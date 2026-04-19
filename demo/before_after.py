@@ -2,7 +2,7 @@
 CodeDrift Arena — Before/After Demo
 Run:  python demo/before_after.py
 
-Shows three drift families: (1) rename, (2) API contract, (3) deleted module — same before/after pattern.
+Shows four vignettes: (1) rename, (2) API contract, (3) deleted module, (4) **two drifts at once** — same before/after pattern.
 """
 
 import copy
@@ -39,6 +39,14 @@ REASON: Helper import looks fine for this release."""
 AFTER_REMOVAL = """VERDICT: REQUEST_CHANGES
 ISSUES: The PR imports from utils.legacy, but utils/legacy.py is not in the current codebase file list; that module was removed.
 REASON: Stale import from a deleted path; drop or replace before merge."""
+
+BEFORE_MULTI = """VERDICT: APPROVE
+ISSUES: none
+REASON: Ship it; the diff matches our usual patterns."""
+
+AFTER_MULTI = """VERDICT: REQUEST_CHANGES
+ISSUES: getUserData is stale (renamed to fetchUserData). createOrder(item, qty) is stale; current API requires userId with item and qty.
+REASON: Two independent drift issues; fix both call sites before merge."""
 
 
 def _actions_to_rows(actions):
@@ -130,6 +138,40 @@ def _removal_demo_state():
     return base, drifted, actions, pr_diff
 
 
+def _multi_drift_demo_state():
+    """Rename + contract in one episode (two ground-truth stale refs)."""
+    base = build_base_codebase()
+    drifted = copy.deepcopy(base)
+    drifted.functions.pop("getUserData", None)
+    drifted.functions["fetchUserData"] = "userId: str"
+    drifted.api_signatures["createOrder"] = ["item", "qty", "userId"]
+    actions = [
+        DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={"signature": "userId: str"},
+        ),
+        DriftAction(
+            drift_type="contract",
+            stale_ref="createOrder(item, qty)",
+            current_ref="createOrder(item, qty, userId)",
+            metadata={
+                "function": "createOrder",
+                "old_params": ["item", "qty"],
+                "new_params": ["item", "qty", "userId"],
+            },
+        ),
+    ]
+    pr_diff = (
+        "diff --git a/src/service.py b/src/service.py\n"
+        "+++ b/src/service.py\n"
+        "+data = getUserData(user_id)\n"
+        "+order = createOrder(item, qty)\n"
+    )
+    return base, drifted, actions, pr_diff
+
+
 def _print_before_after_scenario(
     *,
     title: str,
@@ -168,6 +210,8 @@ def _print_before_after_scenario(
         f"CAUGHT: {info_before['caught']} | MISSED: {info_before['missed']} | "
         f"RECALL: {rb:.0%} | OUTCOME: {info_before.get('episode_outcome')}"
     )
+    if info_before.get("metric_strip"):
+        print(f"METRICS: {info_before['metric_strip']}")
 
     env2 = CodeDriftEnv(difficulty="easy")
     env2.inject_episode(
@@ -187,6 +231,8 @@ def _print_before_after_scenario(
         f"CAUGHT: {info_after['caught']} | MISSED: {info_after['missed']} | "
         f"RECALL: {ra:.0%} | OUTCOME: {info_after.get('episode_outcome')}"
     )
+    if info_after.get("metric_strip"):
+        print(f"METRICS: {info_after['metric_strip']}")
 
     print(f"\n{'-' * 60}")
     delta = reward_after - reward_before
@@ -233,6 +279,17 @@ def run_demo(seed: int = 42):
         pr_diff=p3,
         before_text=BEFORE_REMOVAL,
         after_text=AFTER_REMOVAL,
+    )
+
+    b4, d4, a4, p4 = _multi_drift_demo_state()
+    _print_before_after_scenario(
+        title="SCENARIO 4: Two drifts at once (rename + contract)",
+        base=b4,
+        drifted=d4,
+        actions=a4,
+        pr_diff=p4,
+        before_text=BEFORE_MULTI,
+        after_text=AFTER_MULTI,
     )
 
 

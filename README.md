@@ -2,6 +2,8 @@
 
 **Train a code reviewer under live schema drift.** A frozen adversary mutates the synthetic repo (renames, deletions, API contract changes). The reviewer sees the **current** codebase plus a **PR diff** that may still reference the old world. A **deterministic scorer** turns the review into a GRPO-ready reward—no human labels per step.
 
+> **30-second hook:** The UI shows **today’s codebase** and a diff written for **yesterday’s**. If they disagree, merging breaks production — the job is to **catch that mismatch** before ship.
+
 | | |
 |--|--|
 | **Repo** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
@@ -29,7 +31,9 @@ python scripts/smoke_env.py
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Optional narrative scripts: `python demo/before_after.py` (rename, contract, **deleted-module** walkthroughs); `python demo/pitch_demo.py` runs the same three vignettes with pitch framing (`--scenario rename|contract|removal|all`, default `all`).
+Optional narrative scripts: `python demo/before_after.py` (rename, contract, deleted-module, **two drifts at once**); `python demo/pitch_demo.py` mirrors those plus pitch framing (`--scenario rename|contract|removal|multi|all`, default `all`).
+
+After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`reward`, `recall`, `verdict`, `malformed_issues`, **`grounded_in_diff`**). **`info["diff_grounding"]`** lists, per ground-truth stale ref, whether that artifact’s text appears in the PR diff — **diagnostic only** (reward still uses **`ISSUES:`** only); use it to spot token-stuffing in ISSUES that is not reflected in the diff.
 
 **Hugging Face Space:** use root `app.py`, root `requirements.txt` (CPU). See [`hf_space/README.md`](hf_space/README.md) for Space wiring.
 
@@ -75,6 +79,19 @@ REASON: one sentence.
 **Scoring intuition (drifted PR):** credit comes from citing **stale** symbols / old signatures in **`ISSUES`**, with **`REQUEST_CHANGES`** when appropriate. Mentioning only the **new** name does not count as catching drift. Clean PRs (`n_stale_refs == 0`) expect **`VERDICT: APPROVE`** with **`ISSUES: none`** (or equivalent).
 
 **Important:** `RewardScorer` does **not** read the PR diff when deciding mentions—it only parses **`ISSUES:`** (plus explicit **`VERDICT:`**). Evidence the model cites must appear under **`ISSUES:`**, not only in free-form text elsewhere.
+
+**Pitch honesty:** The rubric scores **coverage of known drift** (did ISSUES cite the right stale artifacts with the right verdict shape)—not whether every sentence of reasoning is factually perfect.
+
+---
+
+## Live demo: failure modes (read before recording)
+
+| Pitfall | What happens | Fix |
+|--------|----------------|-----|
+| Second **Score** without **New episode** | `RuntimeError` — single-step env | Click **New episode** between runs |
+| Model skips **`ISSUES:`** | `malformed_issues`, no mention credit | Show the required template on-screen |
+| Missing **`VERDICT:`** line | Defaults to **REQUEST_CHANGES** | Same — enforce template |
+| Judging “wrong line number” in prose | Not scored; only ISSUES tokens + verdict | Say that in the pitch |
 
 ---
 

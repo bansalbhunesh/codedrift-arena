@@ -7,6 +7,11 @@ echoing the codebase into REASON alone.
 
 Identifiers (function names) use word-boundary matching to reduce substring
 false positives (e.g. ``getUserDatab`` should not match ``getUserData``).
+
+**Diff grounding** (``info["diff_grounding"]``) is diagnostic only: it checks
+whether each ground-truth stale artifact appears as text in the PR diff. It
+does **not** change the reward—judges use it to spot ISSUES token-stuffing
+without diff support.
 """
 
 from __future__ import annotations
@@ -14,6 +19,27 @@ from __future__ import annotations
 import re
 
 from agents.drift_agent import DriftAction
+
+
+def _stale_token_in_pr_diff(action: DriftAction, pr_diff: str) -> bool:
+    """Heuristic: stale artifact text appears in the diff (diagnostic, not used for reward)."""
+    d = (pr_diff or "").lower()
+    if not d.strip():
+        return False
+    if action.drift_type == "removal":
+        mod = (action.metadata.get("module") or "").lower()
+        st = action.stale_ref.lower()
+        return bool(
+            st in d
+            or (mod and mod in d)
+            or (mod and mod.replace(".", "/") in d)
+        )
+    if action.drift_type == "contract":
+        fn = (action.metadata.get("function") or "").lower()
+        bare = action.stale_ref.split("(")[0].lower()
+        return fn in d or bare in d or action.stale_ref.lower() in d
+    bare = action.stale_ref.split("(")[0].lower()
+    return bare in d or action.stale_ref.lower() in d
 
 
 def _normalize_issues_text(raw: str) -> str:
@@ -87,7 +113,6 @@ class RewardScorer:
         Returns (total_reward, info_dict).
         info_dict contains per-signal breakdown for logging.
         """
-        _ = pr_diff
         if agent_response is None:
             agent_response = ""
         verdict = self._extract_verdict(agent_response)
@@ -104,6 +129,10 @@ class RewardScorer:
         }
 
         if not actions:
+            parsed = self._parse_issues_section(agent_response)
+            info["malformed_issues"] = parsed is None
+            info["diff_grounding"] = []
+            info["diff_grounded_count"] = 0
             if verdict == "APPROVE":
                 total += self.R_CORRECT_APPROVE
                 info["breakdown"]["correct_approve"] = self.R_CORRECT_APPROVE
@@ -112,6 +141,10 @@ class RewardScorer:
                 total += self.R_FALSE_REJECTION
                 info["breakdown"]["false_rejection"] = self.R_FALSE_REJECTION
                 info["episode_outcome"] = "false_rejection"
+            mal = "yes" if info["malformed_issues"] else "no"
+            info["metric_strip"] = (
+                f"reward={total:+.2f} | verdict={verdict} | n_stale=0 | malformed_issues={mal}"
+            )
             return total, info
 
         info["expected_stale_keys"] = [self._stale_key(a) for a in actions]
@@ -154,6 +187,24 @@ class RewardScorer:
             info["episode_outcome"] = "partial"
         else:
             info["episode_outcome"] = "missed_all"
+
+        grounds = [
+            {
+                "key": self._stale_key(a),
+                "stale_token_in_pr_diff": _stale_token_in_pr_diff(a, pr_diff),
+            }
+            for a in actions
+        ]
+        info["diff_grounding"] = grounds
+        ng = sum(1 for g in grounds if g["stale_token_in_pr_diff"])
+        info["diff_grounded_count"] = ng
+        info["diff_grounding_fraction"] = ng / max(1, n)
+
+        mal = "yes" if info["malformed_issues"] else "no"
+        info["metric_strip"] = (
+            f"reward={total:+.2f} | recall={info['recall']:.0%} | verdict={verdict} | "
+            f"malformed_issues={mal} | grounded_in_diff={ng}/{n}"
+        )
 
         return total, info
 

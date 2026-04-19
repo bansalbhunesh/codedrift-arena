@@ -26,6 +26,27 @@ class TestRewardScorer(unittest.TestCase):
         )
         self.assertAlmostEqual(r, self.s.R_CORRECT_APPROVE)
         self.assertEqual(info["episode_outcome"], "correct_approve")
+        self.assertIn("metric_strip", info)
+        self.assertEqual(info.get("diff_grounded_count"), 0)
+
+    def test_diff_grounding_and_metric_strip_on_drift(self) -> None:
+        a = DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={},
+        )
+        pr = "+x = getUserData(uid)\n"
+        r, info = self.s.score(
+            "VERDICT: REQUEST_CHANGES\nISSUES: getUserData is stale\nREASON: ok.\n",
+            [a],
+            pr,
+        )
+        self.assertGreater(r, 0.0)
+        self.assertEqual(len(info["diff_grounding"]), 1)
+        self.assertTrue(info["diff_grounding"][0]["stale_token_in_pr_diff"])
+        self.assertEqual(info.get("diff_grounded_count"), 1)
+        self.assertIn("grounded_in_diff=1/1", info.get("metric_strip", ""))
 
     def test_clean_pr_reject(self) -> None:
         r, info = self.s.score(

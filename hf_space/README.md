@@ -11,7 +11,8 @@ This folder holds the **Gradio** UI (`space_app.py`). The repository root contai
 ## What judges see
 
 - **New episode**: samples drift + PR diff + codebase snapshot.
-- **Score review**: paste any text (e.g. your model’s review); the deterministic `RewardScorer` returns reward and breakdown.
+- **Score review**: paste any text (e.g. your model’s review); the deterministic `RewardScorer` returns reward and JSON breakdown.
+- **Status line**: compact **metric strip** (reward, recall, verdict, malformed ISSUES, `grounded_in_diff`) plus `episode_id` / outcome — see root README for semantics.
 
 No GPU is required for this demo.
 

@@ -21,6 +21,19 @@ def _fmt_info(info: dict[str, Any]) -> str:
     return json.dumps(info, indent=2, default=str)
 
 
+def _status_lines(reward: float, info: dict[str, Any]) -> str:
+    """Compact judge-facing summary + full metric strip from scorer."""
+    strip = info.get("metric_strip") or ""
+    lines = [strip] if strip else [f"reward={reward:+.2f}"]
+    ep = info.get("episode_id")
+    if ep:
+        lines.append(f"episode_id={ep}")
+    out = info.get("episode_outcome")
+    if out:
+        lines.append(f"outcome={out}")
+    return "\n".join(lines)
+
+
 def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
     try:
         s = int(seed)
@@ -70,7 +83,7 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
         return env, gr.update(), gr.update(), gr.update(), gr.update(), "Paste a non-empty review.", gr.update()
     try:
         _, reward, _done, info = env.step(review)
-        status = f"Step complete (episode {info.get('episode_id', '')}). Reward: {reward:+.2f}"
+        status = "Step complete.\n" + _status_lines(reward, info)
         return env, gr.update(), gr.update(), gr.update(), "", status, _fmt_info(info)
     except Exception as e:
         snap = env.debug_snapshot() if env is not None else {}
@@ -89,12 +102,19 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
 with gr.Blocks(title="CodeDrift Arena") as demo:
     gr.Markdown(
         "## CodeDrift Arena\n"
+        "**Hook:** The left panel is **today's codebase**; the diff is what the PR still assumes. "
+        "When they disagree, shipping the PR breaks production — the reviewer must catch that.\n\n"
         "Trainable **code reviewer** vs frozen **drift** on a synthetic repo. "
         "This Space runs the **environment + reward** on CPU (no LLM weights). "
         "Paste any review text and see how `RewardScorer` grades it.\n\n"
-        "_Tip: use `VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES` plus mention stale symbols in `ISSUES`._\n\n"
+        "_Tip: use `VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES` plus mention stale symbols in `ISSUES:`._\n\n"
         "_Rubric: the scorer grades **only** the `ISSUES:` body and explicit `VERDICT:` "
-        "(it does not parse the PR diff text for rewards—evidence must appear under `ISSUES:`)._"
+        "(it does not parse the PR diff text for rewards—evidence must appear under `ISSUES:`). "
+        "After scoring, read **`grounded_in_diff`** in the JSON: it shows whether each stale ref "
+        "appears in the diff text (diagnostic only; reward is unchanged)._\n\n"
+        "**Live demo pitfalls:** After scoring, click **New episode** before scoring again (single-step env). "
+        "If the model skips `ISSUES:` or `VERDICT:`, you get `malformed_issues` / conservative defaults — "
+        "see Status line and JSON."
     )
 
     env_state = gr.State(None)

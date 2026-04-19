@@ -123,6 +123,8 @@ def _run_pitch_scenario(
         f"\n  REWARD: {r_before:+.1f}  (ships broken code) | RECALL: {rb:.0%} | "
         f"OUTCOME: {info_b.get('episode_outcome')}"
     )
+    if info_b.get("metric_strip"):
+        print(f"  METRICS: {info_b['metric_strip']}")
 
     env2 = CodeDriftEnv(difficulty="easy", seed=seed)
     env2.inject_episode(
@@ -142,6 +144,8 @@ def _run_pitch_scenario(
         f"\n  REWARD: {r_after:+.1f}  (catches the bug) | RECALL: {ra:.0%} | "
         f"OUTCOME: {info_a.get('episode_outcome')}"
     )
+    if info_a.get("metric_strip"):
+        print(f"  METRICS: {info_a['metric_strip']}")
 
     print(f"\n{'=' * 62}")
     print(f"  IMPROVEMENT:  {r_before:+.1f}  ->  {r_after:+.1f}  (delta {r_after - r_before:+.1f})")
@@ -190,9 +194,21 @@ def run_demo(seed: int = 7, scenario: str = "all") -> None:
                 ba.AFTER_REMOVAL,
             )
         )
+    if scenario in ("all", "multi"):
+        b, d, a, p = ba._multi_drift_demo_state()
+        scenarios.append(
+            (
+                "SCENARIO 4 - Two drifts (rename + contract)",
+                "  Two independent problems in one PR\n"
+                "  [Stale function name AND stale API arity]",
+                (b, d, a, p),
+                ba.BEFORE_MULTI,
+                ba.AFTER_MULTI,
+            )
+        )
 
     if not scenarios:
-        raise SystemExit(f"unknown scenario: {scenario!r} (use all|rename|contract|removal)")
+        raise SystemExit(f"unknown scenario: {scenario!r} (use all|rename|contract|removal|multi)")
 
     print(f"\n{'#' * 62}")
     print("  CODEDRIFT ARENA - LIVE PITCH DEMO")
@@ -223,9 +239,9 @@ def main() -> None:
     p = argparse.ArgumentParser(description="CodeDrift Arena pitch demo")
     p.add_argument(
         "--scenario",
-        choices=["all", "rename", "contract", "removal"],
+        choices=["all", "rename", "contract", "removal", "multi"],
         default="all",
-        help="Run one drift family or all three (default: all).",
+        help="Run one drift family, multi-drift, or all (default: all).",
     )
     p.add_argument("--seed", type=int, default=7, help="RNG seed for env construction.")
     args = p.parse_args()
