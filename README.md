@@ -1,35 +1,149 @@
 # CodeDrift Arena
 
-RL environment for **PR review under adversarial codebase drift** (rename / file removal / API contract), with a deterministic reward for GRPO-style training.
+**Train a code reviewer under live schema drift.** A frozen adversary mutates the synthetic repo (renames, deletions, API contract changes). The reviewer sees the **current** codebase plus a **PR diff** that may still reference the old world. A **deterministic scorer** turns the review into a GRPO-ready reward—no human labels per step.
 
-## Install (pick one)
+| | |
+|--|--|
+| **Repo** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
+| **Live demo** | Hugging Face Space: set `CODEDRIFT_HF_SPACE_URL` in `.env` or paste your Space URL here after deploy |
+| **Stack** | Python · Gradio (CPU demo) · TRL GRPO + Unsloth (optional GPU train) · OpenEnv HTTP bridge (optional) |
 
-| Goal | Command |
-|------|-----------|
-| **Hugging Face Space** (CPU demo) | Default: `pip install -r requirements.txt` |
-| **GRPO training** (GPU, Colab) | `pip install -r requirements-train.txt` |
-| **OpenEnv HTTP server** | `pip install -r requirements-server.txt` |
+---
 
-## Quick local checks
+## Why judges care (30 seconds)
+
+1. **Clear story** — Oversight agent (reviewer) vs adversary (drift) in a shared codebase; drift is structured and inspectable.
+2. **Real RL hook** — Single-step MDP, dense sparse-ish reward, offline episode rows for fast iteration.
+3. **Demo-safe CPU path** — Space runs **env + scorer only**; paste any model output and see reward + JSON breakdown instantly.
+4. **Novelty without black boxes** — Drift types and ground-truth `DriftAction`s are explicit; reward rules are readable in `rewards/scorer.py`.
+
+---
+
+## Judge path (under 2 minutes)
 
 ```bash
+git clone https://github.com/bansalbhunesh/codedrift-arena.git
+cd codedrift-arena
+pip install -r requirements.txt
 python scripts/smoke_env.py
-python demo/before_after.py
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Optional: `export CODEDRIFT_LOG_LEVEL=DEBUG` before running training or env-heavy scripts (see `codedrift/logutil.py`).
+Optional narrative scripts: `python demo/before_after.py`, `python demo/pitch_demo.py` (see `demo/`).
 
-## Layout
+**Hugging Face Space:** use root `app.py`, root `requirements.txt` (CPU). See [`hf_space/README.md`](hf_space/README.md) for Space wiring.
 
-- `training/train.py` — GRPO training (TRL constructor is version-detected at runtime).
-- `server/app.py` — OpenEnv FastAPI app (`uvicorn server.app:app`).
-- `app.py` + `hf_space/` — Gradio Space UI; see `hf_space/README.md`.
+---
 
-## Environment API notes
+## Architecture
 
-- **`reset()`** — random drifted episode from `DriftAgent`.
-- **`set_clean_episode(pr_diff)`** — no drift; use for clean-PR training rows.
-- **`inject_episode(...)`** — scripted demos/tests; sets `_episode_ready` and a stable observation for **`step()`**.
-- **`step()`** returns the **same** observation snapshot as at episode start (single-step contract). A **second `step()`** without a new `reset` / `inject` / `set_clean_episode` raises `RuntimeError`.
-- Shared **`codedrift/constants.py`**: `DIFFICULTIES`, `PERSONALITIES` (used by env + drift agent, no import cycles).
+```mermaid
+flowchart LR
+  subgraph setup [Episode setup]
+    B[Base codebase]
+    D[DriftAgent]
+    B --> D
+    D --> S[Drifted state + ground-truth actions]
+    S --> G[PR diff generator]
+  end
+  subgraph agent [Reviewer]
+    G --> O[Observation: prompt + diff + codebase]
+    O --> R[Model or scripted review]
+  end
+  subgraph reward [Reward]
+    R --> X[RewardScorer]
+    X --> RW[Scalar reward + info dict]
+  end
+```
+
+- **`DriftAgent`** (`agents/drift_agent.py`) — frozen; personalities (`random`, `subtle`, `aggressive`, `escalating`) and difficulty (`easy` / `medium` / `hard`) control challenge.
+- **`CodeDriftEnv`** (`env/codedrift_env.py`) — builds observation, caches reset obs through the single `step` (see API notes below).
+- **`RewardScorer`** (`rewards/scorer.py`) — parses **`ISSUES:`** only for “did you cite the stale artifact?”; **`VERDICT:`** must be explicit.
+
+---
+
+## Review format (models must follow this)
+
+The reviewer should answer in **exactly** this shape (used by the scorer and prompts):
+
+```text
+VERDICT: APPROVE | REQUEST_CHANGES
+ISSUES: … list every stale reference, or write none …
+REASON: one sentence.
+```
+
+**Scoring intuition (drifted PR):** credit comes from citing **stale** symbols / old signatures in **`ISSUES`**, with **`REQUEST_CHANGES`** when appropriate. Mentioning only the **new** name does not count as catching drift. Clean PRs (`n_stale_refs == 0`) expect **`VERDICT: APPROVE`** with **`ISSUES: none`** (or equivalent).
+
+---
+
+## Install matrix
+
+| Goal | Command |
+|------|---------|
+| **HF Space / local CPU** | `pip install -r requirements.txt` |
+| **GRPO training** (GPU, e.g. Colab) | `pip install -r requirements-train.txt` |
+| **OpenEnv HTTP server** | `pip install -r requirements-server.txt` then `uvicorn server.app:app --host 0.0.0.0 --port 8000` |
+
+Copy [`.env.example`](.env.example) to `.env` and set `CODEDRIFT_HF_*`, `WANDB_*` when you want clean logs and metadata (optional for the minimal demo).
+
+---
+
+## Environment API (important for demos & training)
+
+| Method | Purpose |
+|--------|---------|
+| `reset()` | New random episode; drift agent runs; `episode_id` assigned. |
+| `set_clean_episode(pr_diff)` | No drift; canonical codebase; for clean-PR training rows. |
+| `inject_episode(...)` | Scripted episode for tests/demos; optional `validate=True` checks consistency. |
+| `step(agent_response)` | **Single-step:** returns the **same** `Observation` as at episode start; `done` is `True`. |
+| `debug_snapshot()` | Small dict: `episode_id`, `episode_ready`, `n_stale_refs`, etc. |
+
+**Gotchas (live demo):**
+
+- Calling **`step()` twice** without a new `reset` / `inject_episode` / `set_clean_episode` raises **`RuntimeError`** (by design).
+- After scoring in the Gradio Space, click **New episode** before scoring again.
+- If the model skips an **`ISSUES:`** block, mention credit is **zero** (malformed); do not put evidence only in **`REASON`**.
+
+---
+
+## Training (outline)
+
+```bash
+pip install -r requirements-train.txt
+python training/train.py --help
+```
+
+Dataset rows are pre-generated episodes plus clean rows; the reward function deserializes ground-truth actions. Row-level failures log and map to a large negative reward so one bad batch line does not crash the trainer.
+
+---
+
+## Repository layout
+
+| Path | Role |
+|------|------|
+| `env/` | `CodeDriftEnv`, synthetic `CodebaseState`, PR diff generation |
+| `agents/` | `DriftAgent`, `DriftAction` |
+| `rewards/` | `RewardScorer` |
+| `training/` | `train.py` (GRPO) |
+| `hf_space/` | Gradio UI (`space_app.py`) |
+| `server/` | FastAPI OpenEnv app |
+| `integrations/` | OpenEnv bridge, shared config |
+| `codedrift/` | `constants.py`, `logutil.py` |
+| `tests/` | Scorer + env lifecycle regressions |
+| `scripts/smoke_env.py` | Quick env + OpenEnv stub check |
+
+---
+
+## Observability
+
+Set `CODEDRIFT_LOG_LEVEL=DEBUG` for verbose logs (`codedrift/logutil.py`). Episode logs include **`episode_id`** on reset and step for correlating Space, OpenEnv, and training runs.
+
+---
+
+## Contributing / hackathon fork checklist
+
+- [ ] Deploy Space and add the URL to your deck + `CODEDRIFT_HF_SPACE_URL`.
+- [ ] Run `python scripts/smoke_env.py` and unit tests before recording.
+- [ ] Rehearse: one **New episode** → paste review → **Score review** → **New episode** again.
+
+Questions or tight demo slots: open an issue on the repo with your Space link and intended model backend (optional).
