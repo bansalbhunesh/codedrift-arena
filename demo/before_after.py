@@ -2,7 +2,8 @@
 CodeDrift Arena — Before/After Demo
 Run:  python demo/before_after.py
 
-Shows four vignettes: (1) rename, (2) API contract, (3) deleted module, (4) **two drifts at once** — same before/after pattern.
+Shows a **funny toxic-approve** beat, then four vignettes building to a **multi-drift finale**:
+rename → removal → contract → **rename+contract (hero ending)**.
 """
 
 import copy
@@ -15,6 +16,10 @@ from codedrift.logutil import configure_logging
 from agents.drift_agent import DriftAction
 from env.codebase import build_base_codebase
 from env.codedrift_env import CodeDriftEnv
+
+FUNNY_RESPONSE = """VERDICT: APPROVE
+ISSUES: none
+REASON: Everything looks good 👍 Ship it."""
 
 BEFORE_RESPONSE = """VERDICT: APPROVE
 ISSUES: none
@@ -211,7 +216,9 @@ def _print_before_after_scenario(
         f"RECALL: {rb:.0%} | OUTCOME: {info_before.get('episode_outcome')}"
     )
     if info_before.get("metric_strip"):
-        print(f"METRICS: {info_before['metric_strip']}")
+        print(f"METRICS: {info_before.get('judge_emoji', '')} {info_before['metric_strip']}")
+    if info_before.get("judge_summary"):
+        print(f"-> {info_before['judge_summary']}")
 
     env2 = CodeDriftEnv(difficulty="easy")
     env2.inject_episode(
@@ -232,12 +239,32 @@ def _print_before_after_scenario(
         f"RECALL: {ra:.0%} | OUTCOME: {info_after.get('episode_outcome')}"
     )
     if info_after.get("metric_strip"):
-        print(f"METRICS: {info_after['metric_strip']}")
+        print(f"METRICS: {info_after.get('judge_emoji', '')} {info_after['metric_strip']}")
+    if info_after.get("judge_summary"):
+        print(f"-> {info_after['judge_summary']}")
 
     print(f"\n{'-' * 60}")
     delta = reward_after - reward_before
     print(f"IMPROVEMENT: {reward_before:+.1f} -> {reward_after:+.1f}  (delta {delta:+.1f})")
     print(sep)
+
+
+def funny_failure_interlude() -> None:
+    """Toxic positivity on a drifted rename — memorable demo beat."""
+    sep = "-" * 60
+    print(f"\n{sep}")
+    print("INTERLUDE: Toxic positivity (same drift as Scenario 1)")
+    print(sep)
+    base, drifted, actions, pr_diff = _rename_demo_state()
+    env = CodeDriftEnv(difficulty="easy")
+    env.inject_episode(drifted=drifted, actions=actions, pr_diff=pr_diff, base=base)
+    print(FUNNY_RESPONSE)
+    _, r, _, info = env.step(FUNNY_RESPONSE)
+    print(f"\nREWARD: {r:+.1f}  (narrator: this is what we train *away* from)")
+    if info.get("metric_strip"):
+        print(f"METRICS: {info.get('judge_emoji', '')} {info['metric_strip']}")
+    if info.get("judge_summary"):
+        print(f"-> {info['judge_summary']}")
 
 
 def run_demo(seed: int = 42):
@@ -247,6 +274,8 @@ def run_demo(seed: int = 42):
     print("\n" + "=" * 60)
     print("CODEDRIFT ARENA - BEFORE / AFTER DEMO (multi-scenario)")
     print("=" * 60)
+
+    funny_failure_interlude()
 
     b1, d1, a1, p1 = _rename_demo_state()
     _print_before_after_scenario(
@@ -259,20 +288,9 @@ def run_demo(seed: int = 42):
         after_text=AFTER_RESPONSE,
     )
 
-    b2, d2, a2, p2 = _contract_demo_state()
-    _print_before_after_scenario(
-        title="SCENARIO 2: API contract drift (stale call arity)",
-        base=b2,
-        drifted=d2,
-        actions=a2,
-        pr_diff=p2,
-        before_text=BEFORE_CONTRACT,
-        after_text=AFTER_CONTRACT,
-    )
-
     b3, d3, a3, p3 = _removal_demo_state()
     _print_before_after_scenario(
-        title="SCENARIO 3: Deleted module (stale import path)",
+        title="SCENARIO 2: Deleted module (stale import path)",
         base=b3,
         drifted=d3,
         actions=a3,
@@ -281,9 +299,20 @@ def run_demo(seed: int = 42):
         after_text=AFTER_REMOVAL,
     )
 
+    b2, d2, a2, p2 = _contract_demo_state()
+    _print_before_after_scenario(
+        title="SCENARIO 3: API contract drift (stale call arity)",
+        base=b2,
+        drifted=d2,
+        actions=a2,
+        pr_diff=p2,
+        before_text=BEFORE_CONTRACT,
+        after_text=AFTER_CONTRACT,
+    )
+
     b4, d4, a4, p4 = _multi_drift_demo_state()
     _print_before_after_scenario(
-        title="SCENARIO 4: Two drifts at once (rename + contract)",
+        title="SCENARIO 4 (FINALE): Two drifts at once (rename + contract)",
         base=b4,
         drifted=d4,
         actions=a4,

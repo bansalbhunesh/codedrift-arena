@@ -124,7 +124,9 @@ def _run_pitch_scenario(
         f"OUTCOME: {info_b.get('episode_outcome')}"
     )
     if info_b.get("metric_strip"):
-        print(f"  METRICS: {info_b['metric_strip']}")
+        print(f"  METRICS: {info_b.get('judge_emoji', '')} {info_b['metric_strip']}")
+    if info_b.get("judge_summary"):
+        print(f"  -> {info_b['judge_summary']}")
 
     env2 = CodeDriftEnv(difficulty="easy", seed=seed)
     env2.inject_episode(
@@ -145,7 +147,9 @@ def _run_pitch_scenario(
         f"OUTCOME: {info_a.get('episode_outcome')}"
     )
     if info_a.get("metric_strip"):
-        print(f"  METRICS: {info_a['metric_strip']}")
+        print(f"  METRICS: {info_a.get('judge_emoji', '')} {info_a['metric_strip']}")
+    if info_a.get("judge_summary"):
+        print(f"  -> {info_a['judge_summary']}")
 
     print(f"\n{'=' * 62}")
     print(f"  IMPROVEMENT:  {r_before:+.1f}  ->  {r_after:+.1f}  (delta {r_after - r_before:+.1f})")
@@ -155,6 +159,9 @@ def _run_pitch_scenario(
 def run_demo(seed: int = 7, scenario: str = "all") -> None:
     configure_logging()
     ba = _load_before_after_module()
+
+    if scenario == "all":
+        ba.funny_failure_interlude()
 
     scenarios: list[tuple[str, str, tuple, str, str]] = []
 
@@ -170,23 +177,11 @@ def run_demo(seed: int = 7, scenario: str = "all") -> None:
                 TRAINED_MODEL_RESPONSE,
             )
         )
-    if scenario in ("all", "contract"):
-        b, d, a, p = ba._contract_demo_state()
-        scenarios.append(
-            (
-                "SCENARIO 2 - Contract (stale call arity)",
-                "  createOrder now requires userId\n"
-                "  [API signature upgraded - PR still uses old arity]",
-                (b, d, a, p),
-                ba.BEFORE_CONTRACT,
-                ba.AFTER_CONTRACT,
-            )
-        )
     if scenario in ("all", "removal"):
         b, d, a, p = ba._removal_demo_state()
         scenarios.append(
             (
-                "SCENARIO 3 - Removal (dead import path)",
+                "SCENARIO 2 - Removal (dead import path)",
                 "  utils/legacy.py removed from the repo\n"
                 "  [File deleted - PR still imports it]",
                 (b, d, a, p),
@@ -194,13 +189,25 @@ def run_demo(seed: int = 7, scenario: str = "all") -> None:
                 ba.AFTER_REMOVAL,
             )
         )
+    if scenario in ("all", "contract"):
+        b, d, a, p = ba._contract_demo_state()
+        scenarios.append(
+            (
+                "SCENARIO 3 - Contract (stale call arity)",
+                "  createOrder now requires userId\n"
+                "  [API signature upgraded - PR still uses old arity]",
+                (b, d, a, p),
+                ba.BEFORE_CONTRACT,
+                ba.AFTER_CONTRACT,
+            )
+        )
     if scenario in ("all", "multi"):
         b, d, a, p = ba._multi_drift_demo_state()
         scenarios.append(
             (
-                "SCENARIO 4 - Two drifts (rename + contract)",
+                "SCENARIO 4 (FINALE) - Two drifts (rename + contract)",
                 "  Two independent problems in one PR\n"
-                "  [Stale function name AND stale API arity]",
+                "  [Stale function name AND stale API arity — hero ending]",
                 (b, d, a, p),
                 ba.BEFORE_MULTI,
                 ba.AFTER_MULTI,

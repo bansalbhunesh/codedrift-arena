@@ -21,6 +21,39 @@ import re
 from agents.drift_agent import DriftAction
 
 
+def verdict_emoji(info: dict, reward: float) -> str:
+    """Compact visual hint for demos (reward is unused but kept for API symmetry)."""
+    _ = reward
+    out = info.get("episode_outcome") or ""
+    if out in ("correct_approve", "perfect"):
+        return "🟢"
+    if out in ("false_rejection", "missed_all"):
+        return "🔴"
+    if out == "partial":
+        return "🟡"
+    return "⚪"
+
+
+def judge_summary_line(info: dict, reward: float) -> str:
+    """One-line human translation for judges (does not affect reward)."""
+    _ = reward
+    n = int(info.get("n_stale_refs", 0) or 0)
+    out = info.get("episode_outcome") or ""
+    if n == 0:
+        if out == "correct_approve":
+            return "Model correctly approved: no injected drift in this episode."
+        if out == "false_rejection":
+            return "Model blocked a clean PR — no stale refs were injected."
+        return "Clean-PR episode — see verdict and ISSUES format."
+    if out == "perfect":
+        return "Model caught every injected stale reference and requested changes."
+    if out == "partial":
+        return "Model caught some drift but missed at least one stale item."
+    if out == "missed_all":
+        return "Model missed drift (unsafe APPROVE or ISSUES did not evidence all stale items)."
+    return "See metric_strip and JSON for details."
+
+
 def _stale_token_in_pr_diff(action: DriftAction, pr_diff: str) -> bool:
     """Heuristic: stale artifact text appears in the diff (diagnostic, not used for reward)."""
     d = (pr_diff or "").lower()
@@ -145,6 +178,8 @@ class RewardScorer:
             info["metric_strip"] = (
                 f"reward={total:+.2f} | verdict={verdict} | n_stale=0 | malformed_issues={mal}"
             )
+            info["judge_emoji"] = verdict_emoji(info, total)
+            info["judge_summary"] = judge_summary_line(info, total)
             return total, info
 
         info["expected_stale_keys"] = [self._stale_key(a) for a in actions]
@@ -205,6 +240,8 @@ class RewardScorer:
             f"reward={total:+.2f} | recall={info['recall']:.0%} | verdict={verdict} | "
             f"malformed_issues={mal} | grounded_in_diff={ng}/{n}"
         )
+        info["judge_emoji"] = verdict_emoji(info, total)
+        info["judge_summary"] = judge_summary_line(info, total)
 
         return total, info
 

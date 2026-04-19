@@ -33,7 +33,9 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 Optional narrative scripts: `python demo/before_after.py` (rename, contract, deleted-module, **two drifts at once**); `python demo/pitch_demo.py` mirrors those plus pitch framing (`--scenario rename|contract|removal|multi|all`, default `all`).
 
-After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`reward`, `recall`, `verdict`, `malformed_issues`, **`grounded_in_diff`**). **`info["diff_grounding"]`** lists, per ground-truth stale ref, whether that artifact’s text appears in the PR diff — **diagnostic only** (reward still uses **`ISSUES:`** only); use it to spot token-stuffing in ISSUES that is not reflected in the diff.
+After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`reward`, `recall`, `verdict`, `malformed_issues`, **`grounded_in_diff`**). **`info["judge_emoji"]`** / **`info["judge_summary"]`** are optional **visual + plain-English** hints (Gradio Status uses them). **`info["diff_grounding"]`** lists, per ground-truth stale ref, whether that artifact’s text appears in the PR diff — **diagnostic only** (reward still uses **`ISSUES:`** only); use it to spot token-stuffing in ISSUES that is not reflected in the diff.
+
+**Slide-ready curve (placeholder):** see [`demo/sample_training_curve.md`](demo/sample_training_curve.md) — swap in real metrics when you have them.
 
 **Hugging Face Space:** use root `app.py`, root `requirements.txt` (CPU). See [`hf_space/README.md`](hf_space/README.md) for Space wiring.
 

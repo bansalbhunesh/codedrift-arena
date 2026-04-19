@@ -22,9 +22,13 @@ def _fmt_info(info: dict[str, Any]) -> str:
 
 
 def _status_lines(reward: float, info: dict[str, Any]) -> str:
-    """Compact judge-facing summary + full metric strip from scorer."""
-    strip = info.get("metric_strip") or ""
-    lines = [strip] if strip else [f"reward={reward:+.2f}"]
+    """Compact judge-facing summary + emoji + metric strip + one-line translation."""
+    emoji = (info.get("judge_emoji") or "").strip() or "⚪"
+    strip = info.get("metric_strip") or f"reward={reward:+.2f}"
+    lines = [f"{emoji} {strip}"]
+    summary = info.get("judge_summary")
+    if summary:
+        lines.append(f"-> {summary}")
     ep = info.get("episode_id")
     if ep:
         lines.append(f"episode_id={ep}")
@@ -104,6 +108,8 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
         "## CodeDrift Arena\n"
         "**Hook:** The left panel is **today's codebase**; the diff is what the PR still assumes. "
         "When they disagree, shipping the PR breaks production — the reviewer must catch that.\n\n"
+        "**Status line:** First row is **emoji + metric strip** (🟢 good outcome, 🔴 bad, 🟡 partial); "
+        "next row is a plain-English **verdict translation**.\n\n"
         "Trainable **code reviewer** vs frozen **drift** on a synthetic repo. "
         "This Space runs the **environment + reward** on CPU (no LLM weights). "
         "Paste any review text and see how `RewardScorer` grades it.\n\n"

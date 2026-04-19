@@ -28,6 +28,25 @@ class TestRewardScorer(unittest.TestCase):
         self.assertEqual(info["episode_outcome"], "correct_approve")
         self.assertIn("metric_strip", info)
         self.assertEqual(info.get("diff_grounded_count"), 0)
+        self.assertEqual(info.get("judge_emoji"), "🟢")
+        self.assertIn("correctly approved", (info.get("judge_summary") or "").lower())
+
+    def test_toxic_positivity_approve_on_drift_is_red(self) -> None:
+        """Drifted PR + APPROVE / ISSUES none should read as a clear failure to judges."""
+        a = DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={},
+        )
+        toxic = (
+            "VERDICT: APPROVE\nISSUES: none\n"
+            "REASON: Everything looks good 👍 Ship it.\n"
+        )
+        r, info = self.s.score(toxic, [a], "+getUserData(x)\n")
+        self.assertLess(r, 0.0)
+        self.assertEqual(info.get("judge_emoji"), "🔴")
+        self.assertIn("missed", (info.get("judge_summary") or "").lower())
 
     def test_diff_grounding_and_metric_strip_on_drift(self) -> None:
         a = DriftAction(
@@ -47,6 +66,8 @@ class TestRewardScorer(unittest.TestCase):
         self.assertTrue(info["diff_grounding"][0]["stale_token_in_pr_diff"])
         self.assertEqual(info.get("diff_grounded_count"), 1)
         self.assertIn("grounded_in_diff=1/1", info.get("metric_strip", ""))
+        self.assertEqual(info.get("judge_emoji"), "🟢")
+        self.assertIn("every injected", (info.get("judge_summary") or "").lower())
 
     def test_clean_pr_reject(self) -> None:
         r, info = self.s.score(
