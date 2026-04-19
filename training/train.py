@@ -134,9 +134,16 @@ def make_reward_fn(difficulty: str):
                 # Match max per-action miss penalty scale (~[-3, +3]) so curves stay interpretable.
                 rewards.append(-1.0)
 
-        assert len(rewards) == n, (
-            f"reward_fn length mismatch: got {len(rewards)} rewards for batch size {n}"
-        )
+        if len(rewards) != n:
+            log.error(
+                "reward_fn length mismatch: got %d rewards for batch size %d",
+                len(rewards),
+                n,
+            )
+            if len(rewards) < n:
+                rewards.extend([-1.0] * (n - len(rewards)))
+            else:
+                del rewards[n:]
         return rewards
 
     return reward_fn

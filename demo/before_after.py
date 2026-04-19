@@ -2,7 +2,7 @@
 CodeDrift Arena — Before/After Demo
 Run:  python demo/before_after.py
 
-Shows two drift families: (1) rename, (2) API contract — same before/after pattern.
+Shows three drift families: (1) rename, (2) API contract, (3) deleted module — same before/after pattern.
 """
 
 import copy
@@ -31,6 +31,14 @@ REASON: Looks consistent with the order service."""
 AFTER_CONTRACT = """VERDICT: REQUEST_CHANGES
 ISSUES: createOrder is still invoked with only item and qty; the current API requires userId. The call createOrder(item, qty) is stale.
 REASON: PR must pass userId to match the codebase contract."""
+
+BEFORE_REMOVAL = """VERDICT: APPROVE
+ISSUES: none
+REASON: Helper import looks fine for this release."""
+
+AFTER_REMOVAL = """VERDICT: REQUEST_CHANGES
+ISSUES: The PR imports from utils.legacy, but utils/legacy.py is not in the current codebase file list; that module was removed.
+REASON: Stale import from a deleted path; drop or replace before merge."""
 
 
 def _actions_to_rows(actions):
@@ -73,6 +81,10 @@ def _rename_demo_state():
 def _contract_demo_state():
     base = build_base_codebase()
     drifted = copy.deepcopy(base)
+    # Match a plausible tree where rename already landed (avoids showing stale getUserData
+    # next to an upgraded createOrder signature in the same snapshot).
+    drifted.functions.pop("getUserData", None)
+    drifted.functions["fetchUserData"] = "userId: str"
     drifted.api_signatures["createOrder"] = ["item", "qty", "userId"]
     actions = [
         DriftAction(
@@ -91,6 +103,29 @@ def _contract_demo_state():
         "+++ b/src/orders.py\n"
         "+# PR still uses old two-argument call\n"
         "+result = createOrder(item, qty)  # stale: missing userId\n"
+    )
+    return base, drifted, actions, pr_diff
+
+
+def _removal_demo_state():
+    base = build_base_codebase()
+    drifted = copy.deepcopy(base)
+    stale_path = "utils/legacy.py"
+    if stale_path not in drifted.files:
+        raise RuntimeError(f"expected {stale_path!r} in base codebase files")
+    drifted.files.remove(stale_path)
+    actions = [
+        DriftAction(
+            drift_type="removal",
+            stale_ref=stale_path,
+            current_ref="[deleted]",
+            metadata={"module": "utils.legacy"},
+        ),
+    ]
+    pr_diff = (
+        "diff --git a/src/helpers.py b/src/helpers.py\n"
+        "+++ b/src/helpers.py\n"
+        "+from utils.legacy import format_date  # stale: module deleted\n"
     )
     return base, drifted, actions, pr_diff
 
@@ -187,6 +222,17 @@ def run_demo(seed: int = 42):
         pr_diff=p2,
         before_text=BEFORE_CONTRACT,
         after_text=AFTER_CONTRACT,
+    )
+
+    b3, d3, a3, p3 = _removal_demo_state()
+    _print_before_after_scenario(
+        title="SCENARIO 3: Deleted module (stale import path)",
+        base=b3,
+        drifted=d3,
+        actions=a3,
+        pr_diff=p3,
+        before_text=BEFORE_REMOVAL,
+        after_text=AFTER_REMOVAL,
     )
 
 

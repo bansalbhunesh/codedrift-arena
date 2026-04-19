@@ -14,6 +14,13 @@ from agents.drift_agent import DriftAgent
 
 
 class TestDriftAgent(unittest.TestCase):
+    def test_aggressive_easy_returns_one_drift_type(self) -> None:
+        """Aggressive must respect difficulty cap (easy => one planned drift type)."""
+        for seed in range(50):
+            agent = DriftAgent(personality="aggressive", seed=seed)
+            picked = agent._pick_drift_types("easy")
+            self.assertEqual(len(picked), 1, msg=f"seed={seed} picked={picked!r}")
+
     def test_subtle_medium_unique_drift_types(self) -> None:
         """Subtle must not pick the same drift type twice on medium (base_count=2)."""
         for seed in range(400):

@@ -29,7 +29,7 @@ python scripts/smoke_env.py
 python -m unittest discover -s tests -p "test_*.py" -v
 ```
 
-Optional narrative scripts: `python demo/before_after.py`, `python demo/pitch_demo.py` (see `demo/`).
+Optional narrative scripts: `python demo/before_after.py` (rename, contract, **deleted-module** walkthroughs), `python demo/pitch_demo.py` (see `demo/`).
 
 **Hugging Face Space:** use root `app.py`, root `requirements.txt` (CPU). See [`hf_space/README.md`](hf_space/README.md) for Space wiring.
 
