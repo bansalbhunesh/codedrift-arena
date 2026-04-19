@@ -22,7 +22,12 @@ except ImportError:  # pragma: no cover
     Action = Observation = State = EnvironmentMetadata = None  # type: ignore
     create_fastapi_app = None  # type: ignore
 
-__all__ = ["OPENENV_AVAILABLE", "CodeDriftOpenEnvironment", "build_openenv_app"]
+__all__ = [
+    "OPENENV_AVAILABLE",
+    "CodeDriftObservation",
+    "CodeDriftOpenEnvironment",
+    "build_openenv_app",
+]
 
 
 def _pack_inner_obs(inner_obs, inner_env: CodeDriftEnv | None = None) -> dict[str, Any]:
@@ -39,6 +44,22 @@ def _pack_inner_obs(inner_obs, inner_env: CodeDriftEnv | None = None) -> dict[st
 
 
 if OPENENV_AVAILABLE:
+
+    class CodeDriftObservation(Observation):  # type: ignore[misc, valid-type]
+        """
+        Observation with explicit fields for wire formats.
+
+        OpenEnv's ``serialize_observation`` omits ``metadata`` from JSON, so
+        prompt/diff must live on top-level fields for HTTP/WebSocket clients.
+        """
+
+        prompt: str = ""
+        pr_diff: str = ""
+        codebase_context: str = ""
+        episode_step: int = 0
+        n_stale_refs: int = 0
+        episode_id: str | None = None
+        scorer_info: dict[str, Any] | None = None
 
     class CodeDriftOpenEnvironment(Environment):  # type: ignore[misc, valid-type]
         """
@@ -81,7 +102,7 @@ if OPENENV_AVAILABLE:
             seed: Optional[int] = None,
             episode_id: Optional[str] = None,
             **kwargs: Any,
-        ) -> Observation:
+        ) -> CodeDriftObservation:
             if seed is not None:
                 self._inner = CodeDriftEnv(
                     difficulty=self._difficulty,
@@ -90,10 +111,18 @@ if OPENENV_AVAILABLE:
                 )
             inner_obs = self._inner.reset()
             self._state = State(episode_id=episode_id or self._inner.episode_id, step_count=0)
-            return Observation(
+            packed = _pack_inner_obs(inner_obs, self._inner)
+            return CodeDriftObservation(
                 done=False,
                 reward=None,
-                metadata=_pack_inner_obs(inner_obs, self._inner),
+                metadata=packed,
+                prompt=inner_obs.prompt,
+                pr_diff=inner_obs.pr_diff,
+                codebase_context=inner_obs.codebase_context,
+                episode_step=inner_obs.episode_step,
+                n_stale_refs=inner_obs.n_stale_refs,
+                episode_id=self._inner.episode_id,
+                scorer_info=None,
             )
 
         def step(
@@ -101,7 +130,7 @@ if OPENENV_AVAILABLE:
             action: Action,
             timeout_s: Optional[float] = None,
             **kwargs: Any,
-        ) -> Observation:
+        ) -> CodeDriftObservation:
             text = str((action.metadata or {}).get("agent_response", "")).strip()
             _inner_obs, reward, done, info = self._inner.step(text)
             self._state = State(
@@ -110,7 +139,18 @@ if OPENENV_AVAILABLE:
             )
             meta = _pack_inner_obs(_inner_obs, self._inner)
             meta["scorer_info"] = info
-            return Observation(done=done, reward=reward, metadata=meta)
+            return CodeDriftObservation(
+                done=done,
+                reward=reward,
+                metadata=meta,
+                prompt=_inner_obs.prompt,
+                pr_diff=_inner_obs.pr_diff,
+                codebase_context=_inner_obs.codebase_context,
+                episode_step=_inner_obs.episode_step,
+                n_stale_refs=_inner_obs.n_stale_refs,
+                episode_id=self._inner.episode_id,
+                scorer_info=info,
+            )
 
         @property
         def state(self) -> State:
@@ -118,15 +158,15 @@ if OPENENV_AVAILABLE:
 
     def build_openenv_app():
         from openenv.core.env_server.types import Action as ActT
-        from openenv.core.env_server.types import Observation as ObsT
 
         return create_fastapi_app(
             lambda: CodeDriftOpenEnvironment(),
             ActT,
-            ObsT,
+            CodeDriftObservation,
         )
 
 else:
+    CodeDriftObservation = None  # type: ignore[misc, assignment]
 
     class CodeDriftOpenEnvironment:  # type: ignore[no-redef]
         """Stub: install ``openenv-core`` for the real OpenEnv server class."""

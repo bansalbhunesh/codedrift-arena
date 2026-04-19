@@ -2,3 +2,4 @@
 openenv-core>=0.1.0
 fastapi
 uvicorn[standard]
+websockets>=10.0

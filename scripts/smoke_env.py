@@ -43,7 +43,7 @@ def smoke_openenv() -> bool:
 
     env = CodeDriftOpenEnvironment(seed=1)
     obs = env.reset(seed=1, episode_id="smoke-1")
-    assert obs.metadata.get("prompt")
+    assert getattr(obs, "prompt", None) or (obs.metadata or {}).get("prompt")
     act = Action(metadata={"agent_response": "VERDICT: APPROVE\nISSUES: none\nREASON: x.\n"})
     obs2 = env.step(act)
     assert obs2.done is True

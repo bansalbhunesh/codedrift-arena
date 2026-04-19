@@ -4,7 +4,11 @@ OpenEnv FastAPI entrypoint for CodeDrift Arena.
 Run:
   uvicorn server.app:app --host 0.0.0.0 --port 8000
 
-Requires: pip install openenv-core uvicorn fastapi
+Requires: pip install -r requirements-server.txt
+
+For a full reset→step episode over HTTP, use the **WebSocket** ``/ws`` session
+(stateless ``POST /reset`` + ``POST /step`` each spin a new env in openenv-core).
+Example: ``python scripts/openenv_ws_demo.py``
 """
 
 from __future__ import annotations

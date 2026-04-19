@@ -2,7 +2,12 @@
 
 from typing import Any
 
-__all__ = ["OPENENV_AVAILABLE", "CodeDriftOpenEnvironment", "build_openenv_app"]
+__all__ = [
+    "OPENENV_AVAILABLE",
+    "CodeDriftObservation",
+    "CodeDriftOpenEnvironment",
+    "build_openenv_app",
+]
 
 
 def __getattr__(name: str) -> Any:
