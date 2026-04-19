@@ -95,6 +95,21 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
         )
     if not review.strip():
         return env, gr.update(), gr.update(), gr.update(), gr.update(), "Paste a non-empty review.", gr.update()
+    if not getattr(env, "_episode_ready", False):
+        return (
+            env,
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            "This episode was already scored (single-step env). Click **New episode**, paste your review, then **Score review** once.",
+            _fmt_info(
+                {
+                    "error": "episode_already_scored",
+                    "hint": "One step per episode — use New episode for another try.",
+                }
+            ),
+        )
     try:
         _, reward, _done, info = env.step(review)
         status = "Step complete.\n" + _status_lines(reward, info)
