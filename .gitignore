@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.venv/
+venv/
+codedrift_output/
+*.pt
+*.bin
+*.safetensors
+wandb/

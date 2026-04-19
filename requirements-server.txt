@@ -1,0 +1,4 @@
+# Slim image for OpenEnv HTTP server only (no torch / unsloth).
+openenv-core>=0.1.0
+fastapi
+uvicorn[standard]

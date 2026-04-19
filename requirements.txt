@@ -1,0 +1,6 @@
+# ---------------------------------------------------------------------------
+# Hugging Face Spaces clones this repo and installs THIS file by default.
+# Keep it CPU-light: Gradio demo only. For GRPO training use requirements-train.txt
+# For the OpenEnv HTTP server use requirements-server.txt
+# ---------------------------------------------------------------------------
+-r requirements-space.txt

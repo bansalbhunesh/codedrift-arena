@@ -1,0 +1,8 @@
+# GPU training stack (Colab, local CUDA). Install:
+#   pip install -r requirements-train.txt
+datasets>=2.14.0
+matplotlib>=3.7.0
+numpy>=1.24.0
+# GRPOTrainer API drifted across TRL versions; 0.24+ matches current HF docs.
+trl>=0.24.0
+unsloth
