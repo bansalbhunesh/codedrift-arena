@@ -15,7 +15,10 @@ RL environment for **PR review under adversarial codebase drift** (rename / file
 ```bash
 python scripts/smoke_env.py
 python demo/before_after.py
+python -m unittest discover -s tests -p "test_*.py" -v
 ```
+
+Optional: `export CODEDRIFT_LOG_LEVEL=DEBUG` before running training or env-heavy scripts (see `codedrift/logutil.py`).
 
 ## Layout
 

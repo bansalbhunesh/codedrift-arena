@@ -12,6 +12,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from codedrift.logutil import configure_logging
 from env.codedrift_env import CodeDriftEnv
 from integrations import config as cfg
 
@@ -86,6 +87,13 @@ def make_reward_fn(difficulty: str):
 
     def reward_fn(prompts, completions, serialized_actions=None, pr_diff=None, **kwargs):
         rewards = []
+        n = len(completions)
+        if serialized_actions is not None and len(serialized_actions) != n:
+            raise ValueError(
+                f"serialized_actions length {len(serialized_actions)} != completions {n}"
+            )
+        if pr_diff is not None and len(pr_diff) != n:
+            raise ValueError(f"pr_diff length {len(pr_diff)} != completions {n}")
         for i, completion in enumerate(completions):
             raw = serialized_actions[i] if serialized_actions is not None else "[]"
             action_dicts = json.loads(raw) if isinstance(raw, str) else raw
@@ -129,10 +137,16 @@ def _instantiate_grpo_trainer(GRPOTrainer, *, model, tokenizer, config, train_da
         kwargs["processing_class"] = tokenizer
     elif "tokenizer" in params:
         kwargs["tokenizer"] = tokenizer
+    else:
+        raise TypeError(
+            "GRPOTrainer has neither processing_class nor tokenizer; "
+            "upgrade/downgrade trl or extend _instantiate_grpo_trainer."
+        )
     return GRPOTrainer(**kwargs)
 
 
 def train(args):
+    configure_logging()
     try:
         from trl import GRPOConfig, GRPOTrainer
         from unsloth import FastLanguageModel

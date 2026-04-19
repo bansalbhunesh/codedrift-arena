@@ -14,6 +14,7 @@ Episode flow:
   6. RewardScorer grades the response deterministically
 """
 
+import logging
 from dataclasses import dataclass
 from typing import Optional
 
@@ -21,6 +22,11 @@ from agents.drift_agent import DriftAction, DriftAgent
 from env.codebase import CodebaseState, build_base_codebase
 from env.pr_generator import PRDiffGenerator
 from rewards.scorer import RewardScorer
+
+DIFFICULTIES = frozenset({"easy", "medium", "hard"})
+PERSONALITIES = frozenset({"random", "subtle", "aggressive", "escalating"})
+
+logger = logging.getLogger(__name__)
 
 REVIEWER_SYSTEM_PROMPT = """You are a senior software engineer doing a code review.
 
@@ -65,6 +71,10 @@ class CodeDriftEnv:
         personality: str = "random",
         seed: Optional[int] = None,
     ):
+        if difficulty not in DIFFICULTIES:
+            raise ValueError(f"difficulty must be one of {sorted(DIFFICULTIES)}, got {difficulty!r}")
+        if personality not in PERSONALITIES:
+            raise ValueError(f"personality must be one of {sorted(PERSONALITIES)}, got {personality!r}")
         self.difficulty = difficulty
         self.drift_agent = DriftAgent(personality=personality, seed=seed)
         self.pr_gen = PRDiffGenerator(seed=seed)
@@ -75,6 +85,7 @@ class CodeDriftEnv:
         self._actions: list[DriftAction] = []
         self._pr_diff: str = ""
         self._step: int = 0
+        self._episode_ready: bool = False
 
     def reset(self) -> Observation:
         """Start a new episode. Returns initial observation."""
@@ -82,6 +93,13 @@ class CodeDriftEnv:
         self._drifted, self._actions = self.drift_agent.act(self._base, self.difficulty)
         self._pr_diff = self.pr_gen.generate(self._actions)
         self._step = 0
+        self._episode_ready = True
+        logger.info(
+            "episode_reset difficulty=%s personality=%s n_stale=%s",
+            self.difficulty,
+            self.drift_agent.personality,
+            len(self._actions),
+        )
         return self._build_obs()
 
     def step(self, agent_response: str) -> tuple[Observation, float, bool, dict]:
@@ -89,6 +107,8 @@ class CodeDriftEnv:
         Process agent response and return (obs, reward, done, info).
         Done after 1 step — each episode is a single review decision.
         """
+        if not self._episode_ready or self._drifted is None:
+            raise RuntimeError("Call reset() before step().")
         reward, info = self.scorer.score(
             agent_response=agent_response,
             actions=self._actions,
@@ -97,6 +117,12 @@ class CodeDriftEnv:
         self._step += 1
         done = True
         obs = self._build_obs()
+        logger.info(
+            "episode_step reward=%.3f outcome=%s verdict=%s",
+            reward,
+            info.get("episode_outcome"),
+            info.get("verdict"),
+        )
         return obs, reward, done, info
 
     def render(self) -> str:
@@ -108,7 +134,7 @@ class CodeDriftEnv:
             f"Stale refs:  {len(self._actions)}",
         ]
         for a in self._actions:
-            lines.append(f"  [{a.drift_type}] {a.stale_ref} → {a.current_ref}")
+            lines.append(f"  [{a.drift_type}] {a.stale_ref} -> {a.current_ref}")
         lines.append("PR diff:")
         lines.append(self._pr_diff)
         lines.append("Codebase (drifted):")

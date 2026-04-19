@@ -86,9 +86,13 @@ class RewardScorer:
         return total, info
 
     def _mentioned(self, action: DriftAction, response_lower: str) -> bool:
-        """Check if agent mentioned the stale reference in any form."""
+        """
+        Whether the response evidences awareness of the *stale* artifact.
+
+        For renames, matching only the *new* symbol must NOT count as a catch
+        (otherwise models get +1.0 for discussing the correct name only).
+        """
         stale_bare = action.stale_ref.split("(")[0].lower()
-        current_bare = action.current_ref.split("(")[0].lower()
 
         if action.drift_type == "removal":
             module = action.metadata.get("module", "").lower()
@@ -98,7 +102,16 @@ class RewardScorer:
                 or module.replace("/", ".") in response_lower
             )
 
-        return stale_bare in response_lower or current_bare in response_lower
+        if action.drift_type == "rename":
+            return stale_bare in response_lower
+
+        if action.drift_type == "contract":
+            if stale_bare in response_lower:
+                return True
+            # Stale call often appears as fn(old_args) in ISSUES; allow full stale_ref match
+            return action.stale_ref.lower() in response_lower
+
+        return stale_bare in response_lower
 
     def _extract_verdict(self, response: str) -> str:
         match = re.search(
