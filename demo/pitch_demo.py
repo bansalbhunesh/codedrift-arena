@@ -65,7 +65,7 @@ def run_demo(seed: int = 7):
     base, drifted, actions, pr_diff = _rename_pitch_state()
 
     env = CodeDriftEnv(difficulty="easy", personality="random", seed=seed)
-    env.inject_episode(drifted=drifted, actions=actions, pr_diff=pr_diff, base=base)
+    obs = env.inject_episode(drifted=drifted, actions=actions, pr_diff=pr_diff, base=base)
 
     print(f"\n{'=' * 62}")
     print("  CODEDRIFT ARENA - LIVE PITCH DEMO")
@@ -82,16 +82,21 @@ def run_demo(seed: int = 7):
 
     print(f"\nSTEP 3: Current codebase state (what agent sees)")
     print(f"{SEPARATOR}")
-    for name in sorted(env._drifted.functions.keys())[:6]:
-        print(f"  def {name}({env._drifted.functions[name]})")
+    for line in obs.codebase_context.splitlines()[:14]:
+        if line.strip():
+            print(f"  {line}")
     print("  ...")
 
     print(f"\n{'=' * 62}")
     print("  BEFORE TRAINING (base model)")
     print(f"{'=' * 62}")
     print(BASE_MODEL_RESPONSE)
-    _, r_before, _, _ = env.step(BASE_MODEL_RESPONSE)
-    print(f"\n  REWARD: {r_before:+.1f}  (ships broken code)")
+    _, r_before, _, info_b = env.step(BASE_MODEL_RESPONSE)
+    rb = float(info_b.get("recall", 0.0))
+    print(
+        f"\n  REWARD: {r_before:+.1f}  (ships broken code) | RECALL: {rb:.0%} | "
+        f"OUTCOME: {info_b.get('episode_outcome')}"
+    )
 
     env2 = CodeDriftEnv(difficulty="easy", seed=seed)
     env2.inject_episode(
@@ -105,8 +110,12 @@ def run_demo(seed: int = 7):
     print("  AFTER TRAINING")
     print(f"{'=' * 62}")
     print(TRAINED_MODEL_RESPONSE)
-    _, r_after, _, _ = env2.step(TRAINED_MODEL_RESPONSE)
-    print(f"\n  REWARD: {r_after:+.1f}  (catches the bug)")
+    _, r_after, _, info_a = env2.step(TRAINED_MODEL_RESPONSE)
+    ra = float(info_a.get("recall", 0.0))
+    print(
+        f"\n  REWARD: {r_after:+.1f}  (catches the bug) | RECALL: {ra:.0%} | "
+        f"OUTCOME: {info_a.get('episode_outcome')}"
+    )
 
     print(f"\n{'=' * 62}")
     print(f"  IMPROVEMENT:  {r_before:+.1f}  ->  {r_after:+.1f}  (delta {r_after - r_before:+.1f})")

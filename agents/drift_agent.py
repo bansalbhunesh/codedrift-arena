@@ -144,8 +144,12 @@ class DriftAgent:
         base_count = {"easy": 1, "medium": 2, "hard": 3}[difficulty]
 
         if self.personality == "subtle":
+            # Bias toward contract in the pool, but sample *without replacement* so
+            # easy=1 / medium=2 / hard=3 never repeats the same drift type in one episode.
             pool = ["contract", "contract", "rename", "removal"]
-            return [self.rng.choice(pool) for _ in range(base_count)]
+            unique_pool = list(dict.fromkeys(pool))
+            k = min(base_count, len(unique_pool))
+            return self.rng.sample(unique_pool, k=k)
 
         elif self.personality == "aggressive":
             pool = ["rename", "removal", "contract"]

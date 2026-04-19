@@ -14,9 +14,6 @@ sys.path.insert(0, str(ROOT))
 
 
 def smoke_core() -> bool:
-    from codedrift.logutil import configure_logging
-
-    configure_logging()
     from env.codedrift_env import CodeDriftEnv
 
     env = CodeDriftEnv(difficulty="easy", personality="random", seed=0)
@@ -56,7 +53,9 @@ def smoke_openenv() -> bool:
 
 
 def main() -> int:
-    # logging configured inside smoke_core; OpenEnv path is quiet unless deps installed
+    from codedrift.logutil import configure_logging
+
+    configure_logging()
     smoke_core()
     smoke_openenv()
     print("Smoke finished.")

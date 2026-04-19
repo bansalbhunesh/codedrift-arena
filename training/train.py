@@ -115,15 +115,24 @@ def make_reward_fn(difficulty: str):
                 ]
 
                 diff = pr_diff[i] if pr_diff is not None else ""
-                reward, _ = scorer.score(
+                reward, info = scorer.score(
                     agent_response=completion,
                     actions=actions,
                     pr_diff=diff,
                 )
+                log.debug(
+                    "reward_fn row=%s reward=%.3f recall=%.2f outcome=%s verdict=%s",
+                    i,
+                    reward,
+                    float(info.get("recall", 0.0)),
+                    info.get("episode_outcome"),
+                    info.get("verdict"),
+                )
                 rewards.append(float(reward))
             except Exception:
                 log.exception("reward_fn_row_failed batch_index=%s", i)
-                rewards.append(-10.0)
+                # Match max per-action miss penalty scale (~[-3, +3]) so curves stay interpretable.
+                rewards.append(-1.0)
 
         return rewards
 

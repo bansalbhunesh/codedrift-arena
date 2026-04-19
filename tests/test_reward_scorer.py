@@ -104,6 +104,28 @@ class TestRewardScorer(unittest.TestCase):
         self.assertEqual(info2["caught"], ["contract:createOrder"])
         self.assertAlmostEqual(r2, self.s.R_CAUGHT_STALE)
 
+    def test_contract_natural_language_params(self) -> None:
+        """ISSUES may name old params in prose without comma-separated call syntax."""
+        a = DriftAction(
+            drift_type="contract",
+            stale_ref="createOrder(item, qty)",
+            current_ref="createOrder(item, qty, userId)",
+            metadata={
+                "function": "createOrder",
+                "old_params": ["item", "qty"],
+                "new_params": ["item", "qty", "userId"],
+            },
+        )
+        r, info = self.s.score(
+            "VERDICT: REQUEST_CHANGES\n"
+            "ISSUES: createOrder is called with wrong parameters item and qty without userId\n"
+            "REASON: ok.\n",
+            [a],
+            "",
+        )
+        self.assertEqual(info["caught"], ["contract:createOrder"])
+        self.assertAlmostEqual(r, self.s.R_CAUGHT_STALE)
+
     def test_inject_episode_then_step(self) -> None:
         import copy
 

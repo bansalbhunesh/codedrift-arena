@@ -113,7 +113,7 @@ pip install -r requirements-train.txt
 python training/train.py --help
 ```
 
-Dataset rows are pre-generated episodes plus clean rows; the reward function deserializes ground-truth actions. Row-level failures log and map to a large negative reward so one bad batch line does not crash the trainer.
+Dataset rows are pre-generated episodes plus clean rows; the reward function deserializes ground-truth actions. Row-level failures log a traceback and assign **`-1.0`** (same scale as a single miss) so one bad batch line does not crash the trainer or dominate reward curves. Set `CODEDRIFT_LOG_LEVEL=DEBUG` to see per-row `recall` / outcome in training logs.
 
 ---
 

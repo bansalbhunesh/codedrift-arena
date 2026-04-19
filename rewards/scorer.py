@@ -164,7 +164,12 @@ class RewardScorer:
                 return False
             if not old_params:
                 return False
-            return param_sig in compact_issues or ", ".join(old_params).lower() in issues_norm
+            params_all_named = all(p.lower() in issues_norm for p in old_params)
+            return (
+                param_sig in compact_issues
+                or ", ".join(old_params).lower() in issues_norm
+                or params_all_named
+            )
 
         return _identifier_mentioned(issues_norm, stale_bare)
 

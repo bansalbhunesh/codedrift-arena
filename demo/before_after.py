@@ -89,7 +89,11 @@ def run_demo(seed: int = 42):
     print(BEFORE_RESPONSE)
     _, reward_before, _, info_before = env.step(BEFORE_RESPONSE)
     print(f"\nREWARD: {reward_before:+.1f}")
-    print(f"CAUGHT: {info_before['caught']} | MISSED: {info_before['missed']}")
+    rb = float(info_before.get("recall", 0.0))
+    print(
+        f"CAUGHT: {info_before['caught']} | MISSED: {info_before['missed']} | "
+        f"RECALL: {rb:.0%} | OUTCOME: {info_before.get('episode_outcome')}"
+    )
 
     env2 = CodeDriftEnv(difficulty="easy")
     env2.inject_episode(drifted=copy.deepcopy(drifted), actions=copy.deepcopy(actions), pr_diff=pr_diff, base=copy.deepcopy(base))
@@ -99,7 +103,11 @@ def run_demo(seed: int = 42):
     print(AFTER_RESPONSE)
     _, reward_after, _, info_after = env2.step(AFTER_RESPONSE)
     print(f"\nREWARD: {reward_after:+.1f}")
-    print(f"CAUGHT: {info_after['caught']} | MISSED: {info_after['missed']}")
+    ra = float(info_after.get("recall", 0.0))
+    print(
+        f"CAUGHT: {info_after['caught']} | MISSED: {info_after['missed']} | "
+        f"RECALL: {ra:.0%} | OUTCOME: {info_after.get('episode_outcome')}"
+    )
 
     print(f"\n{'-' * 60}")
     delta = reward_after - reward_before
