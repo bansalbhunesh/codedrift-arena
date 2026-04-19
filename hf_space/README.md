@@ -12,7 +12,7 @@ This folder holds the **Gradio** UI (`space_app.py`). The repository root contai
 
 - **New episode**: samples drift + PR diff + codebase snapshot.
 - **Score review**: paste any text (e.g. your model’s review); the deterministic `RewardScorer` returns reward and JSON breakdown.
-- **Status line**: **emoji** (🟢/🔴/🟡) + **metric strip** + one-line **plain-English summary** (`judge_summary`), then `episode_id` / outcome — see root README for semantics.
+- **Status line**: **emoji** + **metric strip** + **`judge_summary`** + **💡 `judge_why_matters`** (production impact) + **`confidence_strip`**, then `episode_id` / outcome — see root README.
 
 No GPU is required for this demo.
 

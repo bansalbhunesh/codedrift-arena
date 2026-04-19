@@ -29,6 +29,12 @@ def _status_lines(reward: float, info: dict[str, Any]) -> str:
     summary = info.get("judge_summary")
     if summary:
         lines.append(f"-> {summary}")
+    why = info.get("judge_why_matters")
+    if why:
+        lines.append(f"💡 {why}")
+    conf = info.get("confidence_strip")
+    if conf:
+        lines.append(conf)
     ep = info.get("episode_id")
     if ep:
         lines.append(f"episode_id={ep}")
@@ -108,8 +114,8 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
         "## CodeDrift Arena\n"
         "**Hook:** The left panel is **today's codebase**; the diff is what the PR still assumes. "
         "When they disagree, shipping the PR breaks production — the reviewer must catch that.\n\n"
-        "**Status line:** First row is **emoji + metric strip** (🟢 good outcome, 🔴 bad, 🟡 partial); "
-        "next row is a plain-English **verdict translation**.\n\n"
+        "**Status line:** **Emoji + metrics**, then **verdict translation**, then **why it matters** (production impact), "
+        "then a **confidence** hint from diff grounding + recall — all diagnostic, reward unchanged.\n\n"
         "Trainable **code reviewer** vs frozen **drift** on a synthetic repo. "
         "This Space runs the **environment + reward** on CPU (no LLM weights). "
         "Paste any review text and see how `RewardScorer` grades it.\n\n"

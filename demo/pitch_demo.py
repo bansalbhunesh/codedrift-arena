@@ -89,6 +89,7 @@ def _run_pitch_scenario(
     before: str,
     after: str,
     seed: int,
+    panel_mod: Any = None,
 ) -> None:
     env = CodeDriftEnv(difficulty="easy", personality="random", seed=seed)
     obs = env.inject_episode(drifted=drifted, actions=actions, pr_diff=pr_diff, base=base)
@@ -123,10 +124,8 @@ def _run_pitch_scenario(
         f"\n  REWARD: {r_before:+.1f}  (ships broken code) | RECALL: {rb:.0%} | "
         f"OUTCOME: {info_b.get('episode_outcome')}"
     )
-    if info_b.get("metric_strip"):
-        print(f"  METRICS: {info_b.get('judge_emoji', '')} {info_b['metric_strip']}")
-    if info_b.get("judge_summary"):
-        print(f"  -> {info_b['judge_summary']}")
+    if panel_mod is not None:
+        panel_mod.print_judge_panel("BEFORE TRAINING", r_before, info_b)
 
     env2 = CodeDriftEnv(difficulty="easy", seed=seed)
     env2.inject_episode(
@@ -146,10 +145,8 @@ def _run_pitch_scenario(
         f"\n  REWARD: {r_after:+.1f}  (catches the bug) | RECALL: {ra:.0%} | "
         f"OUTCOME: {info_a.get('episode_outcome')}"
     )
-    if info_a.get("metric_strip"):
-        print(f"  METRICS: {info_a.get('judge_emoji', '')} {info_a['metric_strip']}")
-    if info_a.get("judge_summary"):
-        print(f"  -> {info_a['judge_summary']}")
+    if panel_mod is not None:
+        panel_mod.print_judge_panel("AFTER TRAINING", r_after, info_a)
 
     print(f"\n{'=' * 62}")
     print(f"  IMPROVEMENT:  {r_before:+.1f}  ->  {r_after:+.1f}  (delta {r_after - r_before:+.1f})")
@@ -233,6 +230,7 @@ def run_demo(seed: int = 7, scenario: str = "all") -> None:
             before=before,
             after=after,
             seed=seed,
+            panel_mod=ba,
         )
 
     print("PITCH LINE:")

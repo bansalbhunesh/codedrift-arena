@@ -54,6 +54,20 @@ ISSUES: getUserData is stale (renamed to fetchUserData). createOrder(item, qty) 
 REASON: Two independent drift issues; fix both call sites before merge."""
 
 
+def print_judge_panel(phase: str, reward: float, info: dict) -> None:
+    """Explicit BEFORE/AFTER style block for terminal demos."""
+    print(f"\n[{phase}]")
+    em = (info.get("judge_emoji") or "⚪").strip()
+    strip = info.get("metric_strip") or f"reward={reward:+.2f}"
+    print(f"{em} {strip}")
+    if info.get("judge_summary"):
+        print(f"-> {info['judge_summary']}")
+    if info.get("judge_why_matters"):
+        print(f"💡 {info['judge_why_matters']}")
+    if info.get("confidence_strip"):
+        print(info["confidence_strip"])
+
+
 def _actions_to_rows(actions):
     rows = []
     for a in actions:
@@ -209,16 +223,12 @@ def _print_before_after_scenario(
     print("BEFORE TRAINING (base model):")
     print(before_text)
     _, reward_before, _, info_before = env.step(before_text)
-    print(f"\nREWARD: {reward_before:+.1f}")
     rb = float(info_before.get("recall", 0.0))
     print(
         f"CAUGHT: {info_before['caught']} | MISSED: {info_before['missed']} | "
         f"RECALL: {rb:.0%} | OUTCOME: {info_before.get('episode_outcome')}"
     )
-    if info_before.get("metric_strip"):
-        print(f"METRICS: {info_before.get('judge_emoji', '')} {info_before['metric_strip']}")
-    if info_before.get("judge_summary"):
-        print(f"-> {info_before['judge_summary']}")
+    print_judge_panel("BEFORE TRAINING", reward_before, info_before)
 
     env2 = CodeDriftEnv(difficulty="easy")
     env2.inject_episode(
@@ -232,16 +242,12 @@ def _print_before_after_scenario(
     print("AFTER TRAINING:")
     print(after_text)
     _, reward_after, _, info_after = env2.step(after_text)
-    print(f"\nREWARD: {reward_after:+.1f}")
     ra = float(info_after.get("recall", 0.0))
     print(
         f"CAUGHT: {info_after['caught']} | MISSED: {info_after['missed']} | "
         f"RECALL: {ra:.0%} | OUTCOME: {info_after.get('episode_outcome')}"
     )
-    if info_after.get("metric_strip"):
-        print(f"METRICS: {info_after.get('judge_emoji', '')} {info_after['metric_strip']}")
-    if info_after.get("judge_summary"):
-        print(f"-> {info_after['judge_summary']}")
+    print_judge_panel("AFTER TRAINING", reward_after, info_after)
 
     print(f"\n{'-' * 60}")
     delta = reward_after - reward_before
@@ -261,10 +267,7 @@ def funny_failure_interlude() -> None:
     print(FUNNY_RESPONSE)
     _, r, _, info = env.step(FUNNY_RESPONSE)
     print(f"\nREWARD: {r:+.1f}  (narrator: this is what we train *away* from)")
-    if info.get("metric_strip"):
-        print(f"METRICS: {info.get('judge_emoji', '')} {info['metric_strip']}")
-    if info.get("judge_summary"):
-        print(f"-> {info['judge_summary']}")
+    print_judge_panel("INTERLUDE (toxic positivity result)", r, info)
 
 
 def run_demo(seed: int = 42):

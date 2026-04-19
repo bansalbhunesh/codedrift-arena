@@ -54,6 +54,49 @@ def judge_summary_line(info: dict, reward: float) -> str:
     return "See metric_strip and JSON for details."
 
 
+def judge_why_matters_line(info: dict, actions: list[DriftAction]) -> str:
+    """Connect technical outcome to production impact (diagnostic; does not affect reward)."""
+    n = len(actions)
+    out = info.get("episode_outcome") or ""
+    types = sorted({a.drift_type for a in actions}) if actions else []
+    type_hint = ", ".join(types) if types else "none"
+    if n == 0:
+        if out == "correct_approve":
+            return "Prevents false alarms: merge when the PR already matches the live codebase."
+        if out == "false_rejection":
+            return "Would waste engineering time blocking a change that already matches production."
+        return "Clean-PR episode — impact is merge velocity vs needless churn."
+    if out == "perfect":
+        return (
+            "Would prevent a production bug caused by outdated code in this diff "
+            f"({type_hint})."
+        )
+    if out == "partial":
+        return "Would still let part of the schema drift ship — latent outages, rollbacks, or hotfixes."
+    if out == "missed_all":
+        return "Would ship broken code: runtime errors, bad behavior, or failed imports/deploys."
+    return "See drift keys and outcome for operational risk."
+
+
+def judge_confidence_line(info: dict) -> str:
+    """Heuristic confidence from diff grounding + recall (diagnostic only)."""
+    n = int(info.get("n_stale_refs", 0) or 0)
+    out = info.get("episode_outcome") or ""
+    recall = float(info.get("recall", 0.0))
+    frac = float(info.get("diff_grounding_fraction", 0.0))
+    if n == 0:
+        return "confidence: HIGH — no injected drift; rubric is approve vs. format only."
+    if out == "perfect" and frac >= 1.0 - 1e-9 and recall >= 1.0 - 1e-9:
+        return "confidence: HIGH — all stale references grounded in PR diff and fully caught in ISSUES."
+    if frac >= 1.0 - 1e-9:
+        return "confidence: MEDIUM — every stale ref appears in the diff; check ISSUES recall / verdict."
+    if recall >= 1.0 - 1e-9:
+        return "confidence: MEDIUM — full ISSUES recall; not every ref is verbatim in diff (see diff_grounding)."
+    if recall > 0.0:
+        return "confidence: MEDIUM — partial catch; ship decision still risky."
+    return "confidence: LOW — missed drift or malformed review; do not treat as production-ready."
+
+
 def _stale_token_in_pr_diff(action: DriftAction, pr_diff: str) -> bool:
     """Heuristic: stale artifact text appears in the diff (diagnostic, not used for reward)."""
     d = (pr_diff or "").lower()
@@ -180,6 +223,8 @@ class RewardScorer:
             )
             info["judge_emoji"] = verdict_emoji(info, total)
             info["judge_summary"] = judge_summary_line(info, total)
+            info["judge_why_matters"] = judge_why_matters_line(info, actions)
+            info["confidence_strip"] = judge_confidence_line(info)
             return total, info
 
         info["expected_stale_keys"] = [self._stale_key(a) for a in actions]
@@ -242,6 +287,8 @@ class RewardScorer:
         )
         info["judge_emoji"] = verdict_emoji(info, total)
         info["judge_summary"] = judge_summary_line(info, total)
+        info["judge_why_matters"] = judge_why_matters_line(info, actions)
+        info["confidence_strip"] = judge_confidence_line(info)
 
         return total, info
 
