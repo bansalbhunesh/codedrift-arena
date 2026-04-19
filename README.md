@@ -25,3 +25,10 @@ Optional: `export CODEDRIFT_LOG_LEVEL=DEBUG` before running training or env-heav
 - `training/train.py` — GRPO training (TRL constructor is version-detected at runtime).
 - `server/app.py` — OpenEnv FastAPI app (`uvicorn server.app:app`).
 - `app.py` + `hf_space/` — Gradio Space UI; see `hf_space/README.md`.
+
+## Environment API notes
+
+- **`reset()`** — random drifted episode from `DriftAgent`.
+- **`set_clean_episode(pr_diff)`** — no drift; use for clean-PR training rows.
+- **`inject_episode(...)`** — scripted demos/tests; sets `_episode_ready` and a stable observation for **`step()`**.
+- **`step()`** returns the **same** observation snapshot as at episode start (single-step contract).

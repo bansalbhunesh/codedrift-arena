@@ -7,7 +7,12 @@ Design principles:
   3. Penalty asymmetry — missing a stale ref (-1.0) is worse than
      a false positive (-0.3).
   4. Structured info dict — training script can log per-signal metrics.
+
+Mention detection uses the **ISSUES** section when present so models cannot
+earn credit by echoing the codebase block into REASON alone.
 """
+
+from __future__ import annotations
 
 import re
 
@@ -21,6 +26,18 @@ class RewardScorer:
     R_FALSE_REJECTION = -0.3
     R_PARTIAL_CREDIT = 0.4
 
+    @staticmethod
+    def _issues_text_lower(response: str) -> str:
+        """Body of ISSUES: … up to REASON: (fallback: whole response)."""
+        m = re.search(
+            r"ISSUES:\s*(.+?)(?:^\s*REASON\s*:|\Z)",
+            response,
+            flags=re.IGNORECASE | re.MULTILINE | re.DOTALL,
+        )
+        if m:
+            return m.group(1).strip().lower()
+        return response.lower()
+
     def score(
         self,
         agent_response: str,
@@ -33,10 +50,10 @@ class RewardScorer:
         """
         _ = pr_diff
         verdict = self._extract_verdict(agent_response)
-        response_lower = agent_response.lower()
+        issues_lower = self._issues_text_lower(agent_response)
 
         total = 0.0
-        info = {
+        info: dict = {
             "verdict": verdict,
             "n_stale_refs": len(actions),
             "caught": [],
@@ -59,7 +76,7 @@ class RewardScorer:
 
         for action in actions:
             key = self._stale_key(action)
-            mentioned = self._mentioned(action, response_lower)
+            mentioned = self._mentioned(action, issues_lower)
 
             if mentioned and verdict == "REQUEST_CHANGES":
                 total += self.R_CAUGHT_STALE
@@ -76,7 +93,12 @@ class RewardScorer:
                 info["missed"].append(key)
                 info["breakdown"][f"missed_{key}"] = self.R_MISSED_STALE
 
-        if len(info["caught"]) == len(actions):
+        n = len(actions)
+        nc = len(info["caught"])
+        info["recall"] = nc / max(1, n)
+        info["precision_hint"] = nc / max(1, nc + len(info["partial"]))
+
+        if nc == n:
             info["episode_outcome"] = "perfect"
         elif info["caught"]:
             info["episode_outcome"] = "partial"
@@ -85,33 +107,30 @@ class RewardScorer:
 
         return total, info
 
-    def _mentioned(self, action: DriftAction, response_lower: str) -> bool:
+    def _mentioned(self, action: DriftAction, issues_lower: str) -> bool:
         """
-        Whether the response evidences awareness of the *stale* artifact.
-
-        For renames, matching only the *new* symbol must NOT count as a catch
-        (otherwise models get +1.0 for discussing the correct name only).
+        Whether ISSUES (or full response if unparseable) evidences the *stale* artifact.
         """
         stale_bare = action.stale_ref.split("(")[0].lower()
 
         if action.drift_type == "removal":
             module = action.metadata.get("module", "").lower()
-            return (
-                stale_bare in response_lower
-                or module.replace(".", "/") in response_lower
-                or module.replace("/", ".") in response_lower
-            )
+            return stale_bare in issues_lower or module in issues_lower
 
         if action.drift_type == "rename":
-            return stale_bare in response_lower
+            return stale_bare in issues_lower
 
         if action.drift_type == "contract":
-            if stale_bare in response_lower:
-                return True
-            # Stale call often appears as fn(old_args) in ISSUES; allow full stale_ref match
-            return action.stale_ref.lower() in response_lower
+            old_params = action.metadata.get("old_params") or []
+            param_sig = ", ".join(old_params).lower().replace(" ", "")
+            compact_issues = issues_lower.replace(" ", "")
+            if stale_bare not in issues_lower:
+                return False
+            if not old_params:
+                return False
+            return param_sig in compact_issues or ", ".join(old_params).lower() in issues_lower
 
-        return stale_bare in response_lower
+        return stale_bare in issues_lower
 
     def _extract_verdict(self, response: str) -> str:
         match = re.search(

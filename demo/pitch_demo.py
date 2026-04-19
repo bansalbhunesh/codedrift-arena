@@ -3,12 +3,15 @@ CodeDrift Arena — Pitch Demo
 Run:  python demo/pitch_demo.py
 """
 
+import copy
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from agents.drift_agent import DriftAction, DriftAgent
+from codedrift.logutil import configure_logging
+from agents.drift_agent import DriftAction
+from env.codebase import build_base_codebase
 from env.codedrift_env import CodeDriftEnv
 
 SEPARATOR = "-" * 62
@@ -25,12 +28,12 @@ fetchUserData. The call on line +8 will raise a NameError at runtime.
 REASON: Stale function reference detected. Update getUserData -> fetchUserData before merging."""
 
 
-def run_demo(seed: int = 7):
-    env = CodeDriftEnv(difficulty="easy", personality="random", seed=seed)
-    env.drift_agent = DriftAgent(personality="random", seed=seed)
-    env.reset()
-
-    env._actions = [
+def _rename_pitch_state():
+    base = build_base_codebase()
+    drifted = copy.deepcopy(base)
+    drifted.functions.pop("getUserData", None)
+    drifted.functions["fetchUserData"] = "userId: str"
+    actions = [
         DriftAction(
             drift_type="rename",
             stale_ref="getUserData",
@@ -38,9 +41,7 @@ def run_demo(seed: int = 7):
             metadata={"signature": "userId: str"},
         )
     ]
-    env._drifted.functions.pop("getUserData", None)
-    env._drifted.functions["fetchUserData"] = "userId: str"
-    env._pr_diff = (
+    pr_diff = (
         "diff --git a/src/feature.py b/src/feature.py\n"
         "--- a/src/feature.py\n"
         "+++ b/src/feature.py\n"
@@ -55,7 +56,16 @@ def run_demo(seed: int = 7):
         "+    data = getUserData(user_id)   # <- stale reference\n"
         "+    return {'status': 'ok', 'data': data}"
     )
-    env._build_obs()
+    return base, drifted, actions, pr_diff
+
+
+def run_demo(seed: int = 7):
+    configure_logging()
+
+    base, drifted, actions, pr_diff = _rename_pitch_state()
+
+    env = CodeDriftEnv(difficulty="easy", personality="random", seed=seed)
+    env.inject_episode(drifted=drifted, actions=actions, pr_diff=pr_diff, base=base)
 
     print(f"\n{'=' * 62}")
     print("  CODEDRIFT ARENA - LIVE PITCH DEMO")
@@ -68,7 +78,7 @@ def run_demo(seed: int = 7):
 
     print("STEP 2: PR diff shown to reviewer agent")
     print(f"{SEPARATOR}")
-    print(env._pr_diff)
+    print(env.pr_diff)
 
     print(f"\nSTEP 3: Current codebase state (what agent sees)")
     print(f"{SEPARATOR}")
@@ -84,9 +94,12 @@ def run_demo(seed: int = 7):
     print(f"\n  REWARD: {r_before:+.1f}  (ships broken code)")
 
     env2 = CodeDriftEnv(difficulty="easy", seed=seed)
-    env2._actions = env._actions
-    env2._pr_diff = env._pr_diff
-    env2._drifted = env._drifted
+    env2.inject_episode(
+        drifted=copy.deepcopy(drifted),
+        actions=copy.deepcopy(actions),
+        pr_diff=pr_diff,
+        base=copy.deepcopy(base),
+    )
 
     print(f"\n{'=' * 62}")
     print("  AFTER TRAINING")

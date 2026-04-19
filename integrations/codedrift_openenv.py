@@ -68,9 +68,9 @@ if OPENENV_AVAILABLE:
                 name="codedrift-arena",
                 description="Single-step PR review RL env under adversarial codebase drift.",
                 version="0.1.0",
-                author="PLACEHOLDER_TEAM_NAME",
+                author=None,
                 readme_content=None,
-                documentation_url=cfg.HF_SPACE_URL,
+                documentation_url=cfg.HF_SPACE_URL or None,
             )
 
         def reset(

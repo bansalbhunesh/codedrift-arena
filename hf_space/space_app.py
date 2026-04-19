@@ -11,7 +11,10 @@ from typing import Any
 
 import gradio as gr
 
+from codedrift.logutil import configure_logging
 from env.codedrift_env import CodeDriftEnv
+
+configure_logging()
 
 
 def _fmt_info(info: dict[str, Any]) -> str:

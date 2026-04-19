@@ -78,7 +78,7 @@ API_CONTRACT_CHANGES = [
 PERSONALITY_MODES = ["random", "subtle", "aggressive", "escalating"]
 
 
-@dataclass
+@dataclass(repr=False)
 class DriftAction:
     """Structured output of one drift agent action."""
 
@@ -86,6 +86,9 @@ class DriftAction:
     stale_ref: str  # what the PR will incorrectly use
     current_ref: str  # what the codebase now has
     metadata: dict  # extra info for reward scorer
+
+    def __repr__(self) -> str:
+        return f"DriftAction({self.drift_type!r}, {self.stale_ref!r} -> {self.current_ref!r})"
 
 
 class DriftAgent:
@@ -118,6 +121,7 @@ class DriftAgent:
             action = self._apply_drift(drifted, dtype)
             if action:
                 actions.append(action)
+                drifted.version += 1
 
         self.episode_count += 1
         return drifted, actions
@@ -132,7 +136,9 @@ class DriftAgent:
             return [self.rng.choice(pool) for _ in range(base_count)]
 
         elif self.personality == "aggressive":
-            return ["rename", "removal", "contract"]
+            pool = ["rename", "removal", "contract"]
+            k = min(len(pool), base_count)
+            return self.rng.sample(pool, k=k)
 
         elif self.personality == "escalating":
             level = min(self.episode_count // 10, 2)
@@ -186,8 +192,6 @@ class DriftAgent:
             for c in API_CONTRACT_CHANGES
             if c["function"] in drifted.api_signatures and drifted.api_signatures[c["function"]] == c["old_params"]
         ]
-        if not candidates:
-            candidates = [c for c in API_CONTRACT_CHANGES if c["function"] in drifted.api_signatures]
         if not candidates:
             return None
         change = self.rng.choice(candidates)

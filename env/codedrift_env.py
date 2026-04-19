@@ -14,6 +14,9 @@ Episode flow:
   6. RewardScorer grades the response deterministically
 """
 
+from __future__ import annotations
+
+import copy
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -58,11 +61,8 @@ class CodeDriftEnv:
     """
     Main environment class. Instantiate once and call reset() per episode.
 
-    Args:
-        difficulty:   easy | medium | hard  (controls drift count)
-        personality:  random | subtle | aggressive | escalating
-                      (controls drift agent behavior style)
-        seed:         optional int for reproducibility
+    Use :meth:`set_clean_episode` or :meth:`inject_episode` for scripted rows
+    (training / demos) instead of assigning private attributes.
     """
 
     def __init__(
@@ -86,6 +86,7 @@ class CodeDriftEnv:
         self._pr_diff: str = ""
         self._step: int = 0
         self._episode_ready: bool = False
+        self._cached_reset_obs: Optional[Observation] = None
 
     def reset(self) -> Observation:
         """Start a new episode. Returns initial observation."""
@@ -94,21 +95,68 @@ class CodeDriftEnv:
         self._pr_diff = self.pr_gen.generate(self._actions)
         self._step = 0
         self._episode_ready = True
+        self._cached_reset_obs = self._build_obs()
         logger.info(
             "episode_reset difficulty=%s personality=%s n_stale=%s",
             self.difficulty,
             self.drift_agent.personality,
             len(self._actions),
         )
-        return self._build_obs()
+        return self._cached_reset_obs
+
+    def set_clean_episode(self, pr_diff: str) -> Observation:
+        """
+        Scripted **clean PR** row: no drift, canonical codebase, custom diff text.
+
+        Sets invariants and ``_episode_ready`` so :meth:`step` is valid.
+        """
+        self._base = build_base_codebase()
+        self._drifted = self._base.clone()
+        self._actions = []
+        self._pr_diff = pr_diff
+        self._step = 0
+        self._episode_ready = True
+        self._cached_reset_obs = self._build_obs()
+        logger.info("set_clean_episode n_stale=0")
+        return self._cached_reset_obs
+
+    def inject_episode(
+        self,
+        *,
+        drifted: CodebaseState,
+        actions: list[DriftAction],
+        pr_diff: str,
+        base: Optional[CodebaseState] = None,
+    ) -> Observation:
+        """
+        Scripted episode (demos / tests): supply drifted state, ground-truth
+        actions, and diff. Does not run DriftAgent.
+
+        ``base`` defaults to a fresh :func:`build_base_codebase` (for context only).
+        """
+        self._base = copy.deepcopy(base) if base is not None else build_base_codebase()
+        self._drifted = copy.deepcopy(drifted)
+        self._actions = copy.deepcopy(actions)
+        self._pr_diff = pr_diff
+        self._step = 0
+        self._episode_ready = True
+        self._cached_reset_obs = self._build_obs()
+        logger.info("inject_episode n_stale=%s", len(self._actions))
+        return self._cached_reset_obs
 
     def step(self, agent_response: str) -> tuple[Observation, float, bool, dict]:
         """
         Process agent response and return (obs, reward, done, info).
-        Done after 1 step — each episode is a single review decision.
+
+        Single-step env: ``obs`` is the **same** observation as after
+        :meth:`reset` / inject (episode_step stays 0) so callers are not
+        misled by a post-step rebuild.
         """
         if not self._episode_ready or self._drifted is None:
-            raise RuntimeError("Call reset() before step().")
+            raise RuntimeError("Call reset(), set_clean_episode(), or inject_episode() before step().")
+        if self._cached_reset_obs is None:
+            raise RuntimeError("Internal error: missing cached reset observation.")
+
         reward, info = self.scorer.score(
             agent_response=agent_response,
             actions=self._actions,
@@ -116,14 +164,13 @@ class CodeDriftEnv:
         )
         self._step += 1
         done = True
-        obs = self._build_obs()
         logger.info(
             "episode_step reward=%.3f outcome=%s verdict=%s",
             reward,
             info.get("episode_outcome"),
             info.get("verdict"),
         )
-        return obs, reward, done, info
+        return self._cached_reset_obs, reward, done, info
 
     def render(self) -> str:
         """Human-readable episode summary — useful for debugging."""

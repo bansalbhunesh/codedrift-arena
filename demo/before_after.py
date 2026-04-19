@@ -3,11 +3,15 @@ CodeDrift Arena — Before/After Demo
 Run:  python demo/before_after.py
 """
 
+import copy
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from codedrift.logutil import configure_logging
+from agents.drift_agent import DriftAction
+from env.codebase import build_base_codebase
 from env.codedrift_env import CodeDriftEnv
 
 BEFORE_RESPONSE = """VERDICT: APPROVE
@@ -32,15 +36,12 @@ def _actions_to_rows(actions):
     return rows
 
 
-def run_demo(seed: int = 42):
-    """Uses a fixed rename drift so canned before/after responses match scoring."""
-
-    env = CodeDriftEnv(difficulty="easy", seed=seed)
-    env.reset()
-
-    from agents.drift_agent import DriftAction
-
-    env._actions = [
+def _rename_demo_state():
+    base = build_base_codebase()
+    drifted = copy.deepcopy(base)
+    drifted.functions.pop("getUserData", None)
+    drifted.functions["fetchUserData"] = "userId: str"
+    actions = [
         DriftAction(
             drift_type="rename",
             stale_ref="getUserData",
@@ -48,9 +49,7 @@ def run_demo(seed: int = 42):
             metadata={"signature": "userId: str"},
         )
     ]
-    env._drifted.functions.pop("getUserData", None)
-    env._drifted.functions["fetchUserData"] = "userId: str"
-    env._pr_diff = (
+    pr_diff = (
         "diff --git a/src/feature.py b/src/feature.py\n"
         "--- a/src/feature.py\n"
         "+++ b/src/feature.py\n"
@@ -58,7 +57,16 @@ def run_demo(seed: int = 42):
         "+data = getUserData(user_id)  # stale\n"
         "+return data\n"
     )
-    obs = env._build_obs()
+    return base, drifted, actions, pr_diff
+
+
+def run_demo(seed: int = 42):
+    configure_logging()
+
+    base, drifted, actions, pr_diff = _rename_demo_state()
+
+    env = CodeDriftEnv(difficulty="easy")
+    obs = env.inject_episode(drifted=drifted, actions=actions, pr_diff=pr_diff, base=base)
 
     sep = "=" * 60
 
@@ -83,11 +91,8 @@ def run_demo(seed: int = 42):
     print(f"\nREWARD: {reward_before:+.1f}")
     print(f"CAUGHT: {info_before['caught']} | MISSED: {info_before['missed']}")
 
-    env2 = CodeDriftEnv(difficulty="easy", seed=seed)
-    env2.reset()
-    env2._actions = list(env._actions)
-    env2._drifted = env._drifted
-    env2._pr_diff = env._pr_diff
+    env2 = CodeDriftEnv(difficulty="easy")
+    env2.inject_episode(drifted=copy.deepcopy(drifted), actions=copy.deepcopy(actions), pr_diff=pr_diff, base=copy.deepcopy(base))
 
     print(f"\n{'-' * 60}")
     print("AFTER TRAINING:")

@@ -10,6 +10,13 @@ import random
 
 from agents.drift_agent import DriftAction
 
+DIFF_FILENAMES = [
+    "src/feature.py",
+    "src/checkout_flow.py",
+    "services/api_handler.py",
+    "lib/sync_worker.py",
+]
+
 # Clean code snippets that are always valid — pad diffs to look realistic
 CLEAN_SNIPPETS = [
     ("+from models.user import User", "import"),
@@ -32,17 +39,18 @@ class PRDiffGenerator:
     def __init__(self, seed: int = None):
         self.rng = random.Random(seed)
 
-    def generate(self, actions: list[DriftAction], filename: str = "src/feature.py") -> str:
+    def generate(self, actions: list[DriftAction], filename: str | None = None) -> str:
         """
         Generates a unified diff that:
         - Looks like a real feature PR
         - Embeds one stale reference per DriftAction
         - Surrounds stale refs with plausible clean code
         """
+        fn = filename or self.rng.choice(DIFF_FILENAMES)
         lines = [
-            f"diff --git a/{filename} b/{filename}",
-            f"--- a/{filename}",
-            f"+++ b/{filename}",
+            f"diff --git a/{fn} b/{fn}",
+            f"--- a/{fn}",
+            f"+++ b/{fn}",
             "@@ -1,15 +1,30 @@",
         ]
 

@@ -50,17 +50,15 @@ def build_dataset(n_episodes: int, difficulty: str, personality: str, seed: int 
         )
 
     clean_env = CodeDriftEnv(difficulty="easy", personality="random")
+    clean_pr = (
+        "diff --git a/src/clean.py b/src/clean.py\n"
+        "+++ b/src/clean.py\n"
+        "+from models.user import User\n"
+        "+user = User.get(user_id)\n"
+        "+return user.to_dict()"
+    )
     for _ in range(max(1, n_episodes // 5)):
-        clean_env.reset()
-        clean_env._actions = []
-        clean_env._pr_diff = (
-            "diff --git a/src/clean.py b/src/clean.py\n"
-            "+++ b/src/clean.py\n"
-            "+from models.user import User\n"
-            "+user = User.get(user_id)\n"
-            "+return user.to_dict()"
-        )
-        obs = clean_env._build_obs()
+        obs = clean_env.set_clean_episode(clean_pr)
         rows.append(
             {
                 "prompt": obs.prompt,
@@ -96,7 +94,12 @@ def make_reward_fn(difficulty: str):
             raise ValueError(f"pr_diff length {len(pr_diff)} != completions {n}")
         for i, completion in enumerate(completions):
             raw = serialized_actions[i] if serialized_actions is not None else "[]"
-            action_dicts = json.loads(raw) if isinstance(raw, str) else raw
+            if isinstance(raw, str):
+                action_dicts = json.loads(raw)
+            elif isinstance(raw, list):
+                action_dicts = raw
+            else:
+                action_dicts = json.loads(str(raw))
 
             actions = [
                 DriftAction(
@@ -160,9 +163,9 @@ def train(args):
     print(f"  Personality: {args.personality}")
     print(f"  Steps:       {args.steps}")
     print(f"  Episodes:    {args.episodes}")
-    print(f"  HF dataset:  {cfg.HF_DATASET_REPO}")
-    print(f"  HF model:    {cfg.HF_MODEL_REPO}")
-    print(f"  W&B project: {cfg.WANDB_PROJECT}\n")
+    print(f"  HF dataset:  {cfg.HF_DATASET_REPO or '(unset — set CODEDRIFT_HF_DATASET_REPO)'}")
+    print(f"  HF model:    {cfg.HF_MODEL_REPO or '(unset — set CODEDRIFT_HF_MODEL_REPO)'}")
+    print(f"  W&B project: {cfg.WANDB_PROJECT or '(unset)'}\n")
 
     print("Loading model...")
     model, tokenizer = FastLanguageModel.from_pretrained(

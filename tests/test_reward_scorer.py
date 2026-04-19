@@ -66,6 +66,55 @@ class TestRewardScorer(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             env.step("VERDICT: APPROVE\nISSUES: none\nREASON: x\n")
 
+    def test_contract_requires_old_params_in_issues(self) -> None:
+        a = DriftAction(
+            drift_type="contract",
+            stale_ref="createOrder(item, qty)",
+            current_ref="createOrder(item, qty, userId)",
+            metadata={"function": "createOrder", "old_params": ["item", "qty"], "new_params": ["item", "qty", "userId"]},
+        )
+        r, info = self.s.score(
+            "VERDICT: REQUEST_CHANGES\nISSUES: createOrder signature changed\nREASON: createOrder(item, qty) is stale\n",
+            [a],
+            "",
+        )
+        self.assertEqual(info["missed"], ["contract:createOrder"])
+
+        r2, info2 = self.s.score(
+            "VERDICT: REQUEST_CHANGES\nISSUES: PR still calls createOrder(item, qty) without userId\nREASON: ok.\n",
+            [a],
+            "",
+        )
+        self.assertEqual(info2["caught"], ["contract:createOrder"])
+        self.assertAlmostEqual(r2, self.s.R_CAUGHT_STALE)
+
+    def test_inject_episode_then_step(self) -> None:
+        import copy
+
+        from env.codebase import build_base_codebase
+        from env.codedrift_env import CodeDriftEnv
+
+        base = build_base_codebase()
+        d = copy.deepcopy(base)
+        d.functions.pop("getUserData", None)
+        d.functions["fetchUserData"] = "userId: str"
+        acts = [
+            DriftAction(
+                drift_type="rename",
+                stale_ref="getUserData",
+                current_ref="fetchUserData",
+                metadata={},
+            ),
+        ]
+        env = CodeDriftEnv()
+        env.inject_episode(drifted=d, actions=acts, pr_diff="+stale", base=base)
+        obs, r, done, _ = env.step(
+            "VERDICT: REQUEST_CHANGES\nISSUES: getUserData\nREASON: x.\n"
+        )
+        self.assertTrue(done)
+        self.assertEqual(obs.episode_step, 0)
+        self.assertGreater(r, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()
