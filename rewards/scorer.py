@@ -1,15 +1,9 @@
 """
 RewardScorer — deterministic, interpretable reward function.
 
-Design principles:
-  1. Fully deterministic — same input always gives same reward.
-  2. Partial credit — catches some but not all stale refs still rewarded.
-  3. Penalty asymmetry — missing a stale ref (-1.0) is worse than
-     a false positive (-0.3).
-  4. Structured info dict — training script can log per-signal metrics.
-
-Mention detection uses the **ISSUES** section when present so models cannot
-earn credit by echoing the codebase block into REASON alone.
+Mention detection uses the **ISSUES** section only. If that section cannot be
+parsed, mention text is treated as empty so models cannot earn credit from
+echoing the codebase into REASON alone.
 """
 
 from __future__ import annotations
@@ -27,16 +21,16 @@ class RewardScorer:
     R_PARTIAL_CREDIT = 0.4
 
     @staticmethod
-    def _issues_text_lower(response: str) -> str:
-        """Body of ISSUES: … up to REASON: (fallback: whole response)."""
+    def _parse_issues_section(response: str) -> str | None:
+        """Return lowercased ISSUES body, or None if no ISSUES: block found."""
         m = re.search(
             r"ISSUES:\s*(.+?)(?:^\s*REASON\s*:|\Z)",
             response,
             flags=re.IGNORECASE | re.MULTILINE | re.DOTALL,
         )
-        if m:
-            return m.group(1).strip().lower()
-        return response.lower()
+        if not m:
+            return None
+        return m.group(1).strip().lower()
 
     def score(
         self,
@@ -50,7 +44,6 @@ class RewardScorer:
         """
         _ = pr_diff
         verdict = self._extract_verdict(agent_response)
-        issues_lower = self._issues_text_lower(agent_response)
 
         total = 0.0
         info: dict = {
@@ -73,6 +66,10 @@ class RewardScorer:
                 info["breakdown"]["false_rejection"] = self.R_FALSE_REJECTION
                 info["episode_outcome"] = "false_rejection"
             return total, info
+
+        parsed = self._parse_issues_section(agent_response)
+        issues_lower = parsed if parsed is not None else ""
+        info["malformed_issues"] = parsed is None
 
         for action in actions:
             key = self._stale_key(action)
@@ -109,7 +106,8 @@ class RewardScorer:
 
     def _mentioned(self, action: DriftAction, issues_lower: str) -> bool:
         """
-        Whether ISSUES (or full response if unparseable) evidences the *stale* artifact.
+        Whether ISSUES text evidences the *stale* artifact.
+        ``issues_lower`` is empty when ISSUES: could not be parsed — no mentions.
         """
         stale_bare = action.stale_ref.split("(")[0].lower()
 
@@ -133,6 +131,7 @@ class RewardScorer:
         return stale_bare in issues_lower
 
     def _extract_verdict(self, response: str) -> str:
+        """Only trust an explicit VERDICT line; default conservative for unknown."""
         match = re.search(
             r"VERDICT\s*:\s*(APPROVE|REQUEST_CHANGES)",
             response,
@@ -140,11 +139,6 @@ class RewardScorer:
         )
         if match:
             return match.group(1).upper()
-        lower = response.lower()
-        if "request_changes" in lower or "request changes" in lower:
-            return "REQUEST_CHANGES"
-        if "approve" in lower:
-            return "APPROVE"
         return "REQUEST_CHANGES"
 
     def _stale_key(self, action: DriftAction) -> str:

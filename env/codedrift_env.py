@@ -22,12 +22,10 @@ from dataclasses import dataclass
 from typing import Optional
 
 from agents.drift_agent import DriftAction, DriftAgent
+from codedrift.constants import DIFFICULTIES, PERSONALITIES
 from env.codebase import CodebaseState, build_base_codebase
 from env.pr_generator import PRDiffGenerator
 from rewards.scorer import RewardScorer
-
-DIFFICULTIES = frozenset({"easy", "medium", "hard"})
-PERSONALITIES = frozenset({"random", "subtle", "aggressive", "escalating"})
 
 logger = logging.getLogger(__name__)
 
@@ -127,16 +125,23 @@ class CodeDriftEnv:
         actions: list[DriftAction],
         pr_diff: str,
         base: Optional[CodebaseState] = None,
+        validate: bool = True,
     ) -> Observation:
         """
         Scripted episode (demos / tests): supply drifted state, ground-truth
         actions, and diff. Does not run DriftAgent.
 
         ``base`` defaults to a fresh :func:`build_base_codebase` (for context only).
+        When ``validate`` is True, checks that actions match ``drifted`` and that
+        ``pr_diff`` plausibly contains stale references.
         """
+        drifted = copy.deepcopy(drifted)
+        act_list = copy.deepcopy(actions)
+        if validate and act_list:
+            _validate_injected_episode(drifted, act_list, pr_diff)
         self._base = copy.deepcopy(base) if base is not None else build_base_codebase()
-        self._drifted = copy.deepcopy(drifted)
-        self._actions = copy.deepcopy(actions)
+        self._drifted = drifted
+        self._actions = act_list
         self._pr_diff = pr_diff
         self._step = 0
         self._episode_ready = True
@@ -170,6 +175,7 @@ class CodeDriftEnv:
             info.get("episode_outcome"),
             info.get("verdict"),
         )
+        self._episode_ready = False
         return self._cached_reset_obs, reward, done, info
 
     def render(self) -> str:
@@ -230,3 +236,45 @@ class CodeDriftEnv:
             f"=== PR DIFF ===\n{self._pr_diff}\n\n"
             f"Your review:"
         )
+
+
+def _validate_injected_episode(drifted: CodebaseState, actions: list[DriftAction], pr_diff: str) -> None:
+    """Raise ValueError if scripted episode is internally inconsistent."""
+    if not pr_diff.strip():
+        raise ValueError("inject_episode: pr_diff must be non-empty")
+
+    for a in actions:
+        if a.drift_type == "rename":
+            if a.stale_ref in drifted.functions:
+                raise ValueError(
+                    f"rename invariant: stale_ref {a.stale_ref!r} must not appear in drifted.functions"
+                )
+            if a.current_ref not in drifted.functions:
+                raise ValueError(
+                    f"rename invariant: current_ref {a.current_ref!r} must appear in drifted.functions"
+                )
+            bare = a.stale_ref.split("(")[0]
+            if bare not in pr_diff and a.stale_ref not in pr_diff:
+                raise ValueError(f"rename invariant: stale symbol {bare!r} not found in pr_diff")
+        elif a.drift_type == "removal":
+            if a.stale_ref in drifted.files:
+                raise ValueError(f"removal invariant: path {a.stale_ref!r} must not be in drifted.files")
+            mod = a.metadata.get("module", "")
+            in_diff = a.stale_ref in pr_diff
+            if mod:
+                in_diff = in_diff or mod in pr_diff or mod.replace(".", "/") in pr_diff
+            if not in_diff:
+                raise ValueError("removal invariant: stale path or module not found in pr_diff")
+        elif a.drift_type == "contract":
+            fn = a.metadata.get("function")
+            new_params = a.metadata.get("new_params")
+            if not fn or new_params is None:
+                raise ValueError("contract action requires metadata.function and new_params")
+            if drifted.api_signatures.get(fn) != list(new_params):
+                raise ValueError(
+                    f"contract invariant: drifted.api_signatures[{fn!r}] must equal action new_params"
+                )
+            if fn not in pr_diff and a.stale_ref not in pr_diff:
+                raise ValueError(f"contract invariant: function or stale_ref not found in pr_diff")
+        else:
+            raise ValueError(f"unknown drift_type: {a.drift_type!r}")

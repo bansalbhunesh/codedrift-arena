@@ -106,7 +106,7 @@ def make_reward_fn(difficulty: str):
                     drift_type=d["drift_type"],
                     stale_ref=d["stale_ref"],
                     current_ref=d["current_ref"],
-                    metadata=d["metadata"],
+                    metadata=d.get("metadata") or {},
                 )
                 for d in action_dicts
             ]

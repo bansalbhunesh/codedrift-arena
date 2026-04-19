@@ -20,6 +20,8 @@ import random
 from dataclasses import dataclass
 from typing import Optional
 
+from codedrift.constants import DIFFICULTIES, PERSONALITIES
+
 # ── Drift catalogue ───────────────────────────────────────────────────────────
 
 FUNCTION_RENAMES = [
@@ -75,9 +77,6 @@ API_CONTRACT_CHANGES = [
     },
 ]
 
-PERSONALITY_MODES = ["random", "subtle", "aggressive", "escalating"]
-
-
 @dataclass(repr=False)
 class DriftAction:
     """Structured output of one drift agent action."""
@@ -99,8 +98,8 @@ class DriftAgent:
     """
 
     def __init__(self, personality: str = "random", seed: Optional[int] = None):
-        if personality not in PERSONALITY_MODES:
-            raise ValueError(f"personality must be one of {PERSONALITY_MODES}, got {personality!r}")
+        if personality not in PERSONALITIES:
+            raise ValueError(f"personality must be one of {sorted(PERSONALITIES)}, got {personality!r}")
         self.personality = personality
         self.episode_count = 0
         self.rng = random.Random(seed)
@@ -110,8 +109,8 @@ class DriftAgent:
         Mutates codebase and returns (drifted_codebase, list[DriftAction]).
         The reviewer must catch every DriftAction in the returned list.
         """
-        if difficulty not in {"easy", "medium", "hard"}:
-            raise ValueError(f"difficulty must be easy|medium|hard, got {difficulty!r}")
+        if difficulty not in DIFFICULTIES:
+            raise ValueError(f"difficulty must be one of {sorted(DIFFICULTIES)}, got {difficulty!r}")
         drifted = copy.deepcopy(codebase)
         actions = []
 

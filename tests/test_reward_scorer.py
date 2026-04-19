@@ -107,13 +107,34 @@ class TestRewardScorer(unittest.TestCase):
             ),
         ]
         env = CodeDriftEnv()
-        env.inject_episode(drifted=d, actions=acts, pr_diff="+stale", base=base)
+        env.inject_episode(
+            drifted=d,
+            actions=acts,
+            pr_diff="+data = getUserData(user_id)\n",
+            base=base,
+        )
         obs, r, done, _ = env.step(
             "VERDICT: REQUEST_CHANGES\nISSUES: getUserData\nREASON: x.\n"
         )
         self.assertTrue(done)
         self.assertEqual(obs.episode_step, 0)
         self.assertGreater(r, 0.0)
+
+    def test_no_issues_section_no_mention_credit(self) -> None:
+        """Stale symbol only in REASON must not count (malformed ISSUES)."""
+        a = DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={},
+        )
+        r, info = self.s.score(
+            "VERDICT: REQUEST_CHANGES\nREASON: getUserData is wrong\n",
+            [a],
+            "",
+        )
+        self.assertEqual(info["missed"], ["rename:getUserData"])
+        self.assertTrue(info.get("malformed_issues"))
 
 
 if __name__ == "__main__":

@@ -31,4 +31,5 @@ Optional: `export CODEDRIFT_LOG_LEVEL=DEBUG` before running training or env-heav
 - **`reset()`** — random drifted episode from `DriftAgent`.
 - **`set_clean_episode(pr_diff)`** — no drift; use for clean-PR training rows.
 - **`inject_episode(...)`** — scripted demos/tests; sets `_episode_ready` and a stable observation for **`step()`**.
-- **`step()`** returns the **same** observation snapshot as at episode start (single-step contract).
+- **`step()`** returns the **same** observation snapshot as at episode start (single-step contract). A **second `step()`** without a new `reset` / `inject` / `set_clean_episode` raises `RuntimeError`.
+- Shared **`codedrift/constants.py`**: `DIFFICULTIES`, `PERSONALITIES` (used by env + drift agent, no import cycles).
