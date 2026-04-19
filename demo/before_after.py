@@ -254,6 +254,7 @@ def _print_before_after_scenario(
     print(f"\n{'-' * 60}")
     delta = reward_after - reward_before
     print(f"IMPROVEMENT: {reward_before:+.1f} -> {reward_after:+.1f}  (delta {delta:+.1f})")
+    print("Contrast: FAILURE -> SUCCESS in one training loop (same drift template).")
     print(sep)
 
 
@@ -324,6 +325,14 @@ def run_demo(seed: int = 42):
         pr_diff=p4,
         before_text=BEFORE_MULTI,
         after_text=AFTER_MULTI,
+    )
+
+    print("\n" + "=" * 60)
+    print("CLOSING")
+    print("=" * 60)
+    print(
+        "AI must not just be correct -- it must stay correct when reality changes.\n"
+        "Rehearse twice; let the numbers breathe."
     )
 
 

@@ -52,6 +52,34 @@ class TestRewardScorer(unittest.TestCase):
         self.assertIn("missed", (info.get("judge_summary") or "").lower())
         self.assertIn("FAILURE: missed schema drift", info.get("judge_keyword_line") or "")
 
+    def test_perfect_multi_drift_keyword(self) -> None:
+        """Finale-style episode with two actions gets the multi-drift SUCCESS headline."""
+        a1 = DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={},
+        )
+        a2 = DriftAction(
+            drift_type="contract",
+            stale_ref="createOrder(item, qty)",
+            current_ref="createOrder(item, qty, userId)",
+            metadata={
+                "function": "createOrder",
+                "old_params": ["item", "qty"],
+                "new_params": ["item", "qty", "userId"],
+            },
+        )
+        pr = "+getUserData(x)\n+createOrder(item, qty)\n"
+        text = (
+            "VERDICT: REQUEST_CHANGES\n"
+            "ISSUES: getUserData stale; createOrder(item, qty) missing userId with item and qty.\n"
+            "REASON: fix both.\n"
+        )
+        r, info = self.s.score(text, [a1, a2], pr)
+        self.assertAlmostEqual(r, 2.0)
+        self.assertIn("multiple drifts blocked", info.get("judge_keyword_line") or "")
+
     def test_diff_grounding_and_metric_strip_on_drift(self) -> None:
         a = DriftAction(
             drift_type="rename",

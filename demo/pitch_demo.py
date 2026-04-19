@@ -150,6 +150,7 @@ def _run_pitch_scenario(
 
     print(f"\n{'=' * 62}")
     print(f"  IMPROVEMENT:  {r_before:+.1f}  ->  {r_after:+.1f}  (delta {r_after - r_before:+.1f})")
+    print("  Contrast: FAILURE -> SUCCESS in one training loop (same drift template).")
     print(f"{'=' * 62}\n")
 
 
@@ -237,6 +238,9 @@ def run_demo(seed: int = 7, scenario: str = "all") -> None:
     print("  'We are not testing if an LLM can review code.'")
     print("  'We are training it to catch bugs in codebases that")
     print("   change underneath it - exactly what happens in production.'")
+    print()
+    print("CLOSING:")
+    print("  AI must not just be correct -- it must stay correct when reality changes.")
     print()
 
 

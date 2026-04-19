@@ -103,14 +103,16 @@ def judge_keyword_line(info: dict) -> str:
     out = info.get("episode_outcome") or ""
     if n == 0:
         if out == "correct_approve":
-            return "🟢 SUCCESS: correctly cleared a clean PR"
+            return "🟢 SUCCESS: cleared clean PR"
         if out == "false_rejection":
-            return "🔴 FAILURE: unnecessary churn on a clean PR"
+            return "🔴 FAILURE: churn on clean PR"
         return "⚪ REVIEW: clean-PR episode"
     if out == "perfect":
-        return "🟢 SUCCESS: correctly blocked outdated code"
+        if n > 1:
+            return "🟢 SUCCESS: multiple drifts blocked"
+        return "🟢 SUCCESS: blocked outdated code"
     if out == "partial":
-        return "🟡 PARTIAL: caught some schema drift — still risky"
+        return "🟡 PARTIAL: some drift still ships"
     if out == "missed_all":
         return "🔴 FAILURE: missed schema drift"
     return "⚪ OUTCOME: see JSON"
