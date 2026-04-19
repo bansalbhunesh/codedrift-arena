@@ -1,3 +1,3 @@
-# Hugging Face Spaces CPU demo (Gradio UI only).
-# Used when you point the Space dependency file here, or merge into root requirements.txt.
+# Optional: `pip install -r requirements-space.txt` for a Gradio-only env.
+# Root `requirements.txt` inlines this line so HF Spaces (single-file mount) can build.
 gradio>=4.44.0
