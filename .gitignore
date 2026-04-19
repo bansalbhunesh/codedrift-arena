@@ -11,3 +11,6 @@ codedrift_output/
 *.bin
 *.safetensors
 wandb/
+
+# Local clone of the Hugging Face Space repo (separate git root; do not nest in GitHub)
+CodeDrift-hf/
