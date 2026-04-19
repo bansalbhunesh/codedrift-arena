@@ -104,6 +104,27 @@ class TestRewardScorer(unittest.TestCase):
         self.assertEqual(info2["caught"], ["contract:createOrder"])
         self.assertAlmostEqual(r2, self.s.R_CAUGHT_STALE)
 
+    def test_contract_param_substring_not_counted(self) -> None:
+        """Short param names must appear as tokens, not as substrings of other words."""
+        a = DriftAction(
+            drift_type="contract",
+            stale_ref="createOrder(item, qty)",
+            current_ref="createOrder(item, qty, userId)",
+            metadata={
+                "function": "createOrder",
+                "old_params": ["item", "qty"],
+                "new_params": ["item", "qty", "userId"],
+            },
+        )
+        r, info = self.s.score(
+            "VERDICT: REQUEST_CHANGES\n"
+            "ISSUES: createOrder lineitem wrong\n"
+            "REASON: x.\n",
+            [a],
+            "",
+        )
+        self.assertEqual(info["missed"], ["contract:createOrder"])
+
     def test_contract_natural_language_params(self) -> None:
         """ISSUES may name old params in prose without comma-separated call syntax."""
         a = DriftAction(

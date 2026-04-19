@@ -74,6 +74,8 @@ REASON: one sentence.
 
 **Scoring intuition (drifted PR):** credit comes from citing **stale** symbols / old signatures in **`ISSUES`**, with **`REQUEST_CHANGES`** when appropriate. Mentioning only the **new** name does not count as catching drift. Clean PRs (`n_stale_refs == 0`) expect **`VERDICT: APPROVE`** with **`ISSUES: none`** (or equivalent).
 
+**Important:** `RewardScorer` does **not** read the PR diff when deciding mentions—it only parses **`ISSUES:`** (plus explicit **`VERDICT:`**). Evidence the model cites must appear under **`ISSUES:`**, not only in free-form text elsewhere.
+
 ---
 
 ## Install matrix

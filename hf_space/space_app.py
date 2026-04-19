@@ -92,7 +92,9 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
         "Trainable **code reviewer** vs frozen **drift** on a synthetic repo. "
         "This Space runs the **environment + reward** on CPU (no LLM weights). "
         "Paste any review text and see how `RewardScorer` grades it.\n\n"
-        "_Tip: use `VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES` plus mention stale symbols in `ISSUES`._"
+        "_Tip: use `VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES` plus mention stale symbols in `ISSUES`._\n\n"
+        "_Rubric: the scorer grades **only** the `ISSUES:` body and explicit `VERDICT:` "
+        "(it does not parse the PR diff text for rewards—evidence must appear under `ISSUES:`)._"
     )
 
     env_state = gr.State(None)

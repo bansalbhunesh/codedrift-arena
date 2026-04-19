@@ -23,6 +23,21 @@ def _normalize_issues_text(raw: str) -> str:
     return s.strip().lower()
 
 
+def _param_token_in_issues(issues_norm: str, param: str) -> bool:
+    """
+    True if ISSUES text plausibly references ``param`` as a parameter name.
+
+    Longer identifiers use word boundaries to avoid substring games; very
+    short names (e.g. ``to``) stay substring-based to avoid brittle prose match.
+    """
+    pl = param.lower()
+    if not pl:
+        return False
+    if len(pl) >= 3 and re.fullmatch(r"[a-z_][a-z0-9_]*", pl):
+        return re.search(rf"\b{re.escape(pl)}\b", issues_norm) is not None
+    return pl in issues_norm
+
+
 def _identifier_mentioned(issues_norm: str, ident: str) -> bool:
     """
     True if ``ident`` appears in ISSUES text. Paths / file refs use substring
@@ -164,7 +179,7 @@ class RewardScorer:
                 return False
             if not old_params:
                 return False
-            params_all_named = all(p.lower() in issues_norm for p in old_params)
+            params_all_named = all(_param_token_in_issues(issues_norm, p) for p in old_params)
             return (
                 param_sig in compact_issues
                 or ", ".join(old_params).lower() in issues_norm
