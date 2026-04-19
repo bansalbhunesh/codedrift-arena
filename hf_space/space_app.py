@@ -22,10 +22,14 @@ def _fmt_info(info: dict[str, Any]) -> str:
 
 
 def _status_lines(reward: float, info: dict[str, Any]) -> str:
-    """Compact judge-facing summary + emoji + metric strip + one-line translation."""
+    """SUCCESS/FAILURE headline + emoji strip + summary + impact + confidence."""
+    lines: list[str] = []
+    kw = info.get("judge_keyword_line")
+    if kw:
+        lines.append(str(kw))
     emoji = (info.get("judge_emoji") or "").strip() or "⚪"
     strip = info.get("metric_strip") or f"reward={reward:+.2f}"
-    lines = [f"{emoji} {strip}"]
+    lines.append(f"{emoji} {strip}")
     summary = info.get("judge_summary")
     if summary:
         lines.append(f"-> {summary}")
@@ -114,8 +118,8 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
         "## CodeDrift Arena\n"
         "**Hook:** The left panel is **today's codebase**; the diff is what the PR still assumes. "
         "When they disagree, shipping the PR breaks production — the reviewer must catch that.\n\n"
-        "**Status line:** **Emoji + metrics**, then **verdict translation**, then **why it matters** (production impact), "
-        "then a **confidence** hint from diff grounding + recall — all diagnostic, reward unchanged.\n\n"
+        "**Status line:** **`judge_keyword_line`** (SUCCESS / FAILURE headline), then **emoji + metrics**, "
+        "then **verdict translation**, **💡 why it matters**, then **short confidence** — all diagnostic, reward unchanged.\n\n"
         "Trainable **code reviewer** vs frozen **drift** on a synthetic repo. "
         "This Space runs the **environment + reward** on CPU (no LLM weights). "
         "Paste any review text and see how `RewardScorer` grades it.\n\n"

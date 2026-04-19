@@ -85,16 +85,35 @@ def judge_confidence_line(info: dict) -> str:
     recall = float(info.get("recall", 0.0))
     frac = float(info.get("diff_grounding_fraction", 0.0))
     if n == 0:
-        return "confidence: HIGH — no injected drift; rubric is approve vs. format only."
+        return "confidence: HIGH (no injected drift)"
     if out == "perfect" and frac >= 1.0 - 1e-9 and recall >= 1.0 - 1e-9:
-        return "confidence: HIGH — all stale references grounded in PR diff and fully caught in ISSUES."
+        return "confidence: HIGH (fully grounded + full recall)"
     if frac >= 1.0 - 1e-9:
-        return "confidence: MEDIUM — every stale ref appears in the diff; check ISSUES recall / verdict."
+        return "confidence: MEDIUM (all stale tokens in diff; check ISSUES)"
     if recall >= 1.0 - 1e-9:
-        return "confidence: MEDIUM — full ISSUES recall; not every ref is verbatim in diff (see diff_grounding)."
+        return "confidence: MEDIUM (full recall; diff match partial)"
     if recall > 0.0:
-        return "confidence: MEDIUM — partial catch; ship decision still risky."
-    return "confidence: LOW — missed drift or malformed review; do not treat as production-ready."
+        return "confidence: MEDIUM (partial recall)"
+    return "confidence: LOW (missed drift or bad format)"
+
+
+def judge_keyword_line(info: dict) -> str:
+    """Visceral SUCCESS / FAILURE headline for demos (diagnostic only)."""
+    n = int(info.get("n_stale_refs", 0) or 0)
+    out = info.get("episode_outcome") or ""
+    if n == 0:
+        if out == "correct_approve":
+            return "🟢 SUCCESS: correctly cleared a clean PR"
+        if out == "false_rejection":
+            return "🔴 FAILURE: unnecessary churn on a clean PR"
+        return "⚪ REVIEW: clean-PR episode"
+    if out == "perfect":
+        return "🟢 SUCCESS: correctly blocked outdated code"
+    if out == "partial":
+        return "🟡 PARTIAL: caught some schema drift — still risky"
+    if out == "missed_all":
+        return "🔴 FAILURE: missed schema drift"
+    return "⚪ OUTCOME: see JSON"
 
 
 def _stale_token_in_pr_diff(action: DriftAction, pr_diff: str) -> bool:
@@ -225,6 +244,7 @@ class RewardScorer:
             info["judge_summary"] = judge_summary_line(info, total)
             info["judge_why_matters"] = judge_why_matters_line(info, actions)
             info["confidence_strip"] = judge_confidence_line(info)
+            info["judge_keyword_line"] = judge_keyword_line(info)
             return total, info
 
         info["expected_stale_keys"] = [self._stale_key(a) for a in actions]
@@ -289,6 +309,7 @@ class RewardScorer:
         info["judge_summary"] = judge_summary_line(info, total)
         info["judge_why_matters"] = judge_why_matters_line(info, actions)
         info["confidence_strip"] = judge_confidence_line(info)
+        info["judge_keyword_line"] = judge_keyword_line(info)
 
         return total, info
 

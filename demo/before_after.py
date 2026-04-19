@@ -57,6 +57,8 @@ REASON: Two independent drift issues; fix both call sites before merge."""
 def print_judge_panel(phase: str, reward: float, info: dict) -> None:
     """Explicit BEFORE/AFTER style block for terminal demos."""
     print(f"\n[{phase}]")
+    if info.get("judge_keyword_line"):
+        print(info["judge_keyword_line"])
     em = (info.get("judge_emoji") or "⚪").strip()
     strip = info.get("metric_strip") or f"reward={reward:+.2f}"
     print(f"{em} {strip}")
