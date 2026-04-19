@@ -18,8 +18,9 @@ from __future__ import annotations
 
 import copy
 import logging
+import uuid
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 from agents.drift_agent import DriftAction, DriftAgent
 from codedrift.constants import DIFFICULTIES, PERSONALITIES
@@ -85,9 +86,14 @@ class CodeDriftEnv:
         self._step: int = 0
         self._episode_ready: bool = False
         self._cached_reset_obs: Optional[Observation] = None
+        self._episode_id: str = ""
+
+    def _new_episode_id(self) -> str:
+        return uuid.uuid4().hex[:12]
 
     def reset(self) -> Observation:
         """Start a new episode. Returns initial observation."""
+        self._episode_id = self._new_episode_id()
         self._base = build_base_codebase()
         self._drifted, self._actions = self.drift_agent.act(self._base, self.difficulty)
         self._pr_diff = self.pr_gen.generate(self._actions)
@@ -95,7 +101,8 @@ class CodeDriftEnv:
         self._episode_ready = True
         self._cached_reset_obs = self._build_obs()
         logger.info(
-            "episode_reset difficulty=%s personality=%s n_stale=%s",
+            "episode_reset episode_id=%s difficulty=%s personality=%s n_stale=%s",
+            self._episode_id,
             self.difficulty,
             self.drift_agent.personality,
             len(self._actions),
@@ -108,6 +115,7 @@ class CodeDriftEnv:
 
         Sets invariants and ``_episode_ready`` so :meth:`step` is valid.
         """
+        self._episode_id = self._new_episode_id()
         self._base = build_base_codebase()
         self._drifted = self._base.clone()
         self._actions = []
@@ -115,7 +123,7 @@ class CodeDriftEnv:
         self._step = 0
         self._episode_ready = True
         self._cached_reset_obs = self._build_obs()
-        logger.info("set_clean_episode n_stale=0")
+        logger.info("set_clean_episode episode_id=%s n_stale=0", self._episode_id)
         return self._cached_reset_obs
 
     def inject_episode(
@@ -139,6 +147,7 @@ class CodeDriftEnv:
         act_list = copy.deepcopy(actions)
         if validate and act_list:
             _validate_injected_episode(drifted, act_list, pr_diff)
+        self._episode_id = self._new_episode_id()
         self._base = copy.deepcopy(base) if base is not None else build_base_codebase()
         self._drifted = drifted
         self._actions = act_list
@@ -146,7 +155,7 @@ class CodeDriftEnv:
         self._step = 0
         self._episode_ready = True
         self._cached_reset_obs = self._build_obs()
-        logger.info("inject_episode n_stale=%s", len(self._actions))
+        logger.info("inject_episode episode_id=%s n_stale=%s", self._episode_id, len(self._actions))
         return self._cached_reset_obs
 
     def step(self, agent_response: str) -> tuple[Observation, float, bool, dict]:
@@ -162,15 +171,20 @@ class CodeDriftEnv:
         if self._cached_reset_obs is None:
             raise RuntimeError("Internal error: missing cached reset observation.")
 
+        if agent_response is None:
+            agent_response = ""
+
         reward, info = self.scorer.score(
             agent_response=agent_response,
             actions=self._actions,
             pr_diff=self._pr_diff,
         )
+        info.setdefault("episode_id", self._episode_id)
         self._step += 1
         done = True
         logger.info(
-            "episode_step reward=%.3f outcome=%s verdict=%s",
+            "episode_step episode_id=%s reward=%.3f outcome=%s verdict=%s",
+            self._episode_id,
             reward,
             info.get("episode_outcome"),
             info.get("verdict"),
@@ -182,6 +196,7 @@ class CodeDriftEnv:
         """Human-readable episode summary — useful for debugging."""
         lines = [
             "-- CodeDrift Arena ---------------------------------",
+            f"Episode id:  {self._episode_id or '(none)'}",
             f"Difficulty:  {self.difficulty}",
             f"Drift agent: {self.drift_agent.describe()}",
             f"Stale refs:  {len(self._actions)}",
@@ -202,6 +217,21 @@ class CodeDriftEnv:
     @property
     def pr_diff(self) -> str:
         return self._pr_diff
+
+    @property
+    def episode_id(self) -> str:
+        return self._episode_id
+
+    def debug_snapshot(self) -> dict[str, Any]:
+        """Compact state for demos / remote debugging (no large blobs)."""
+        return {
+            "episode_id": self._episode_id,
+            "episode_ready": self._episode_ready,
+            "difficulty": self.difficulty,
+            "n_stale_refs": len(self._actions),
+            "drift_version": getattr(self._drifted, "version", None),
+            "step_counter": self._step,
+        }
 
     def _build_obs(self) -> Observation:
         ctx = self._format_codebase(self._drifted)

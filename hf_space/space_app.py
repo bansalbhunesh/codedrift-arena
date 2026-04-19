@@ -26,28 +26,64 @@ def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
         s = int(seed)
     except ValueError:
         s = 42
-    env = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=s)
-    obs = env.reset()
-    status = f"Episode started (n_stale_refs shown to trainer only: {obs.n_stale_refs})."
-    return (
-        env,
-        obs.prompt,
-        obs.pr_diff,
-        obs.codebase_context,
-        "",
-        status,
-        _fmt_info({"note": "Submit a review to see scorer output."}),
-    )
+    try:
+        env = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=s)
+        obs = env.reset()
+        status = (
+            f"Episode started id={env.episode_id} "
+            f"(n_stale_refs shown to trainer only: {obs.n_stale_refs})."
+        )
+        return (
+            env,
+            obs.prompt,
+            obs.pr_diff,
+            obs.codebase_context,
+            "",
+            status,
+            _fmt_info({"note": "Submit a review to see scorer output.", "episode_id": env.episode_id}),
+        )
+    except Exception as e:
+        err = {"error": str(e), "type": type(e).__name__}
+        return (
+            None,
+            "",
+            "",
+            "",
+            "",
+            f"Failed to start episode: {e!s}",
+            _fmt_info(err),
+        )
 
 
 def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
     if env is None:
-        return None, "", "", "", "Reset an episode first.", ""
+        return (
+            None,
+            "",
+            "",
+            "",
+            "",
+            "Reset an episode first.",
+            _fmt_info({"error": "no_env"}),
+        )
     if not review.strip():
-        return env, gr.update(), gr.update(), gr.update(), gr.update(), "Paste a non-empty review."
-    _, reward, _done, info = env.step(review)
-    status = f"Step complete. Reward: {reward:+.2f}"
-    return env, gr.update(), gr.update(), gr.update(), "", status, _fmt_info(info)
+        return env, gr.update(), gr.update(), gr.update(), gr.update(), "Paste a non-empty review.", gr.update()
+    try:
+        _, reward, _done, info = env.step(review)
+        status = f"Step complete (episode {info.get('episode_id', '')}). Reward: {reward:+.2f}"
+        return env, gr.update(), gr.update(), gr.update(), "", status, _fmt_info(info)
+    except Exception as e:
+        snap = env.debug_snapshot() if env is not None else {}
+        err = {"error": str(e), "type": type(e).__name__, "env": snap}
+        return (
+            env,
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            f"Scoring failed: {e!s}",
+            _fmt_info(err),
+        )
 
 
 with gr.Blocks(title="CodeDrift Arena") as demo:

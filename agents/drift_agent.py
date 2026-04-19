@@ -16,9 +16,12 @@ This framing earns the Fleet AI bonus prize:
 """
 
 import copy
+import logging
 import random
 from dataclasses import dataclass
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 from codedrift.constants import DIFFICULTIES, PERSONALITIES
 
@@ -121,6 +124,16 @@ class DriftAgent:
             if action:
                 actions.append(action)
                 drifted.version += 1
+
+        if len(actions) < len(drift_types):
+            logger.warning(
+                "drift_agent_partial_apply personality=%s difficulty=%s planned=%s applied=%s "
+                "(catalog exhausted or invariants prevented some drifts)",
+                self.personality,
+                difficulty,
+                len(drift_types),
+                len(actions),
+            )
 
         self.episode_count += 1
         return drifted, actions

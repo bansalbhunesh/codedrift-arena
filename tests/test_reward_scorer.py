@@ -59,6 +59,22 @@ class TestRewardScorer(unittest.TestCase):
         self.assertEqual(info2["caught"], ["rename:getUserData"])
         self.assertAlmostEqual(r2, self.s.R_CAUGHT_STALE)
 
+    def test_rename_substring_false_positive(self) -> None:
+        """ISSUES must cite the stale identifier as a token, not as a substring."""
+        a = DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={},
+        )
+        r, info = self.s.score(
+            "VERDICT: REQUEST_CHANGES\nISSUES: getUserDatab is mentioned\nREASON: x.\n",
+            [a],
+            "",
+        )
+        self.assertEqual(info["missed"], ["rename:getUserData"])
+        self.assertLess(r, 0)
+
     def test_step_before_reset_raises(self) -> None:
         from env.codedrift_env import CodeDriftEnv
 

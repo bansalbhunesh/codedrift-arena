@@ -25,14 +25,17 @@ except ImportError:  # pragma: no cover
 __all__ = ["OPENENV_AVAILABLE", "CodeDriftOpenEnvironment", "build_openenv_app"]
 
 
-def _pack_inner_obs(inner_obs) -> dict[str, Any]:
-    return {
+def _pack_inner_obs(inner_obs, inner_env: CodeDriftEnv | None = None) -> dict[str, Any]:
+    meta: dict[str, Any] = {
         "prompt": inner_obs.prompt,
         "pr_diff": inner_obs.pr_diff,
         "codebase_context": inner_obs.codebase_context,
         "episode_step": inner_obs.episode_step,
         "n_stale_refs": inner_obs.n_stale_refs,
     }
+    if inner_env is not None and getattr(inner_env, "episode_id", ""):
+        meta["episode_id"] = inner_env.episode_id
+    return meta
 
 
 if OPENENV_AVAILABLE:
@@ -86,11 +89,11 @@ if OPENENV_AVAILABLE:
                     seed=seed,
                 )
             inner_obs = self._inner.reset()
-            self._state = State(episode_id=episode_id, step_count=0)
+            self._state = State(episode_id=episode_id or self._inner.episode_id, step_count=0)
             return Observation(
                 done=False,
                 reward=None,
-                metadata=_pack_inner_obs(inner_obs),
+                metadata=_pack_inner_obs(inner_obs, self._inner),
             )
 
         def step(
@@ -105,7 +108,7 @@ if OPENENV_AVAILABLE:
                 episode_id=self._state.episode_id,
                 step_count=self._state.step_count + 1,
             )
-            meta = _pack_inner_obs(_inner_obs)
+            meta = _pack_inner_obs(_inner_obs, self._inner)
             meta["scorer_info"] = info
             return Observation(done=done, reward=reward, metadata=meta)
 

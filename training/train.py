@@ -7,6 +7,7 @@ Quant:   Unsloth 4-bit LoRA
 
 import argparse
 import json
+import logging
 import sys
 from pathlib import Path
 
@@ -82,6 +83,7 @@ def make_reward_fn(difficulty: str):
 
     _ = difficulty  # reserved for curriculum / logging
     scorer = RewardScorer()
+    log = logging.getLogger("codedrift.train.reward")
 
     def reward_fn(prompts, completions, serialized_actions=None, pr_diff=None, **kwargs):
         rewards = []
@@ -93,31 +95,35 @@ def make_reward_fn(difficulty: str):
         if pr_diff is not None and len(pr_diff) != n:
             raise ValueError(f"pr_diff length {len(pr_diff)} != completions {n}")
         for i, completion in enumerate(completions):
-            raw = serialized_actions[i] if serialized_actions is not None else "[]"
-            if isinstance(raw, str):
-                action_dicts = json.loads(raw)
-            elif isinstance(raw, list):
-                action_dicts = raw
-            else:
-                action_dicts = json.loads(str(raw))
+            try:
+                raw = serialized_actions[i] if serialized_actions is not None else "[]"
+                if isinstance(raw, str):
+                    action_dicts = json.loads(raw)
+                elif isinstance(raw, list):
+                    action_dicts = raw
+                else:
+                    action_dicts = json.loads(str(raw))
 
-            actions = [
-                DriftAction(
-                    drift_type=d["drift_type"],
-                    stale_ref=d["stale_ref"],
-                    current_ref=d["current_ref"],
-                    metadata=d.get("metadata") or {},
+                actions = [
+                    DriftAction(
+                        drift_type=d["drift_type"],
+                        stale_ref=d["stale_ref"],
+                        current_ref=d["current_ref"],
+                        metadata=d.get("metadata") or {},
+                    )
+                    for d in action_dicts
+                ]
+
+                diff = pr_diff[i] if pr_diff is not None else ""
+                reward, _ = scorer.score(
+                    agent_response=completion,
+                    actions=actions,
+                    pr_diff=diff,
                 )
-                for d in action_dicts
-            ]
-
-            diff = pr_diff[i] if pr_diff is not None else ""
-            reward, _ = scorer.score(
-                agent_response=completion,
-                actions=actions,
-                pr_diff=diff,
-            )
-            rewards.append(float(reward))
+                rewards.append(float(reward))
+            except Exception:
+                log.exception("reward_fn_row_failed batch_index=%s", i)
+                rewards.append(-10.0)
 
         return rewards
 

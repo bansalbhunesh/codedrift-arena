@@ -17,6 +17,19 @@ from env.codedrift_env import CodeDriftEnv
 
 
 class TestCodeDriftEnv(unittest.TestCase):
+    def test_episode_id_on_reset_and_step_info(self) -> None:
+        env = CodeDriftEnv(difficulty="easy", seed=0)
+        env.reset()
+        self.assertEqual(len(env.episode_id), 12)
+        _obs, _r, _d, info = env.step("VERDICT: APPROVE\nISSUES: none\nREASON: x.\n")
+        self.assertEqual(info.get("episode_id"), env.episode_id)
+
+    def test_step_accepts_none_response(self) -> None:
+        env = CodeDriftEnv(difficulty="easy", seed=1)
+        env.reset()
+        _obs, _r, _d, _info = env.step(None)  # type: ignore[arg-type]
+        self.assertEqual(_info.get("verdict"), "REQUEST_CHANGES")
+
     def test_second_step_raises_until_reset(self) -> None:
         env = CodeDriftEnv(difficulty="easy", seed=0)
         env.reset()
