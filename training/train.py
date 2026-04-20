@@ -6,6 +6,7 @@ Quant:   Unsloth 4-bit LoRA
 """
 
 import argparse
+import hashlib
 import json
 import logging
 import sys
@@ -18,28 +19,62 @@ from env.codedrift_env import CodeDriftEnv
 from integrations import config as cfg
 
 
-def build_dataset(n_episodes: int, difficulty: str, personality: str, seed: int = 42):
+def _serialize_actions(actions) -> list[dict]:
+    return [
+        {
+            "drift_type": a.drift_type,
+            "stale_ref": a.stale_ref,
+            "current_ref": a.current_ref,
+            "metadata": a.metadata,
+        }
+        for a in actions
+    ]
+
+
+def _row_primary_stale_key(row: dict) -> str:
+    actions = json.loads(row.get("serialized_actions", "[]"))
+    if not actions:
+        return "clean:none"
+    first = actions[0]
+    stale_ref = str(first.get("stale_ref", "")).split("(")[0]
+    return f"{first.get('drift_type', 'unknown')}:{stale_ref}"
+
+
+def _stable_holdout_bucket(key: str, seed: int) -> float:
+    digest = hashlib.sha1(f"{seed}:{key}".encode("utf-8")).hexdigest()
+    # 32-bit bucket for deterministic split in [0, 1).
+    return int(digest[:8], 16) / 0xFFFFFFFF
+
+
+def split_train_eval_rows(rows: list[dict], holdout_fraction: float, seed: int) -> tuple[list[dict], list[dict]]:
+    """Deterministically hold out stale keys for basic memorization checks."""
+    train_rows: list[dict] = []
+    eval_rows: list[dict] = []
+    for row in rows:
+        key = _row_primary_stale_key(row)
+        if key == "clean:none":
+            # Keep clean rows in train to stabilize conservative defaults.
+            train_rows.append(row)
+            continue
+        bucket = _stable_holdout_bucket(key, seed)
+        if bucket < holdout_fraction:
+            eval_rows.append(row)
+        else:
+            train_rows.append(row)
+    return train_rows, eval_rows
+
+
+def build_dataset_rows(n_episodes: int, difficulty: str, personality: str, seed: int = 42) -> list[dict]:
     """
     Pre-generate episodes offline so training is fast.
     Each row: prompt + ground truth stale_refs (passed as kwargs to reward fn).
     """
-    from datasets import Dataset
-
     rows = []
     env = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=seed)
 
     for _ in range(n_episodes):
         obs = env.reset()
-
-        serialized_actions = [
-            {
-                "drift_type": a.drift_type,
-                "stale_ref": a.stale_ref,
-                "current_ref": a.current_ref,
-                "metadata": a.metadata,
-            }
-            for a in env.stale_actions
-        ]
+        serialized_actions = _serialize_actions(env.stale_actions)
 
         rows.append(
             {
@@ -73,7 +108,19 @@ def build_dataset(n_episodes: int, difficulty: str, personality: str, seed: int 
 
     rng = random.Random(seed)
     rng.shuffle(rows)
+    return rows
 
+
+def build_dataset(n_episodes: int, difficulty: str, personality: str, seed: int = 42):
+    """Returns HuggingFace Dataset for training."""
+    from datasets import Dataset
+
+    rows = build_dataset_rows(
+        n_episodes=n_episodes,
+        difficulty=difficulty,
+        personality=personality,
+        seed=seed,
+    )
     return Dataset.from_list(rows)
 
 
@@ -208,14 +255,26 @@ def train(args):
         use_gradient_checkpointing=True,
     )
 
+    from datasets import Dataset
+
     print("Building dataset...")
-    dataset = build_dataset(
+    rows = build_dataset_rows(
         n_episodes=args.episodes,
         difficulty=args.difficulty,
         personality=args.personality,
         seed=args.seed,
     )
-    print(f"Dataset: {len(dataset)} episodes")
+    train_rows, eval_rows = split_train_eval_rows(rows, args.heldout_fraction, args.seed)
+    dataset = Dataset.from_list(train_rows)
+    print(
+        f"Dataset: train={len(train_rows)} rows, heldout_eval={len(eval_rows)} rows "
+        f"(heldout_fraction={args.heldout_fraction:.2f})"
+    )
+    if args.eval_split_out:
+        out = Path(args.eval_split_out)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(eval_rows, indent=2), encoding="utf-8")
+        print(f"Wrote heldout split to {out}")
 
     reward_fn = make_reward_fn(args.difficulty)
 
@@ -262,6 +321,12 @@ def parse_args():
     p.add_argument("--episodes", type=int, default=500)
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--output_dir", default=cfg.OUTPUT_DIR)
+    p.add_argument("--heldout_fraction", type=float, default=0.2)
+    p.add_argument(
+        "--eval_split_out",
+        default="",
+        help="Optional path to write held-out eval rows as JSON.",
+    )
     return p.parse_args()
 
 

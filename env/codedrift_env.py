@@ -222,6 +222,11 @@ class CodeDriftEnv:
     def episode_id(self) -> str:
         return self._episode_id
 
+    @property
+    def is_ready_for_step(self) -> bool:
+        """Whether the current episode can accept exactly one ``step`` call."""
+        return self._episode_ready
+
     def debug_snapshot(self) -> dict[str, Any]:
         """Compact state for demos / remote debugging (no large blobs)."""
         return {

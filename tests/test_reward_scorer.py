@@ -224,6 +224,53 @@ class TestRewardScorer(unittest.TestCase):
         self.assertEqual(info["caught"], ["contract:createOrder"])
         self.assertAlmostEqual(r, self.s.R_CAUGHT_STALE)
 
+    def test_spurious_stale_identifier_penalty(self) -> None:
+        """Keyword-dumping stale catalog symbols should incur a deterministic penalty."""
+        a = DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={},
+        )
+        focused, _ = self.s.score(
+            "VERDICT: REQUEST_CHANGES\nISSUES: getUserData is stale\nREASON: x.\n",
+            [a],
+            "",
+        )
+        spammy, info_spam = self.s.score(
+            (
+                "VERDICT: REQUEST_CHANGES\n"
+                "ISSUES: getUserData is stale; also createOrder sendEmail authenticate "
+                "deleteRecord validateInput parseResponse checkPermission\n"
+                "REASON: x.\n"
+            ),
+            [a],
+            "",
+        )
+        self.assertLess(spammy, focused)
+        self.assertGreater(len(info_spam.get("spurious_mentions", [])), 0)
+        self.assertIn("spurious_stale_mentions", info_spam.get("breakdown", {}))
+
+    def test_no_spurious_penalty_for_expected_removal_module(self) -> None:
+        """Removal drifts may reference stale file path or dotted module without penalty."""
+        a = DriftAction(
+            drift_type="removal",
+            stale_ref="services/v1_client.py",
+            current_ref="[deleted]",
+            metadata={"module": "services.v1_client"},
+        )
+        r, info = self.s.score(
+            (
+                "VERDICT: REQUEST_CHANGES\n"
+                "ISSUES: stale import from services.v1_client and deleted file services/v1_client.py\n"
+                "REASON: x.\n"
+            ),
+            [a],
+            "",
+        )
+        self.assertAlmostEqual(r, self.s.R_CAUGHT_STALE)
+        self.assertEqual(info.get("spurious_mentions"), [])
+
     def test_inject_episode_then_step(self) -> None:
         import copy
 

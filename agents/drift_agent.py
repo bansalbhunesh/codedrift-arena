@@ -19,7 +19,7 @@ import copy
 import logging
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -87,7 +87,7 @@ class DriftAction:
     drift_type: str  # rename | removal | contract | none
     stale_ref: str  # what the PR will incorrectly use
     current_ref: str  # what the codebase now has
-    metadata: dict  # extra info for reward scorer
+    metadata: dict[str, Any]  # extra info for reward scorer
 
     def __repr__(self) -> str:
         return f"DriftAction({self.drift_type!r}, {self.stale_ref!r} -> {self.current_ref!r})"

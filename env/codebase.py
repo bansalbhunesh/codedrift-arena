@@ -4,6 +4,7 @@ Codebase state — shared data model used by env, drift agent, and reward scorer
 
 import copy
 from dataclasses import dataclass, field
+from typing import Dict, List
 
 
 @dataclass
@@ -14,9 +15,9 @@ class CodebaseState:
     The PR diff contains stale references to the PRE-mutation state.
     """
 
-    functions: dict = field(default_factory=dict)  # name -> signature string
-    files: list = field(default_factory=list)  # available file paths
-    api_signatures: dict = field(default_factory=dict)  # fn name -> param list
+    functions: Dict[str, str] = field(default_factory=dict)  # name -> signature string
+    files: List[str] = field(default_factory=list)  # available file paths
+    api_signatures: Dict[str, List[str]] = field(default_factory=dict)  # fn name -> param list
     version: int = 0  # bumped on each drift
 
     def clone(self) -> "CodebaseState":

@@ -36,7 +36,7 @@ CLEAN_SNIPPETS = [
 
 
 class PRDiffGenerator:
-    def __init__(self, seed: int = None):
+    def __init__(self, seed: int | None = None):
         self.rng = random.Random(seed)
 
     def generate(self, actions: list[DriftAction], filename: str | None = None) -> str:

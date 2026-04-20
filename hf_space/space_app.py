@@ -95,7 +95,7 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
         )
     if not review.strip():
         return env, gr.update(), gr.update(), gr.update(), gr.update(), "Paste a non-empty review.", gr.update()
-    if not getattr(env, "_episode_ready", False):
+    if not env.is_ready_for_step:
         return (
             env,
             gr.update(),

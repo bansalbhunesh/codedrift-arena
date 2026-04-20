@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 
-from agents.drift_agent import DriftAction
+from agents.drift_agent import API_CONTRACT_CHANGES, FUNCTION_RENAMES, REMOVABLE_FILES, DriftAction
 
 
 def verdict_emoji(info: dict, reward: float) -> str:
@@ -181,12 +181,37 @@ def _identifier_mentioned(issues_norm: str, ident: str) -> bool:
     return ident_l in issues_norm
 
 
+def _catalog_stale_identifiers() -> set[str]:
+    """
+    Canonical stale identifiers from the drift catalog.
+
+    Used to penalize ISSUES keyword-dumping of stale symbols unrelated to the
+    active episode.
+    """
+    out: set[str] = set()
+    for old_name, _new_name in FUNCTION_RENAMES:
+        out.add(old_name.lower())
+    for item in API_CONTRACT_CHANGES:
+        fn = str(item.get("function", "")).strip().lower()
+        if fn:
+            out.add(fn)
+    for path in REMOVABLE_FILES:
+        p = path.lower()
+        out.add(p)
+        out.add(p.replace("/", ".").replace(".py", ""))
+    return out
+
+
+CATALOG_STALE_IDENTIFIERS = _catalog_stale_identifiers()
+
+
 class RewardScorer:
     R_CAUGHT_STALE = 1.0
     R_CORRECT_APPROVE = 0.5
     R_MISSED_STALE = -1.0
     R_FALSE_REJECTION = -0.3
     R_PARTIAL_CREDIT = 0.4
+    R_SPURIOUS_STALE_MENTION = -0.25
 
     @staticmethod
     def _parse_issues_section(response: str) -> str | None:
@@ -276,6 +301,21 @@ class RewardScorer:
                 info["missed"].append(key)
                 info["breakdown"][f"missed_{key}"] = self.R_MISSED_STALE
 
+        expected_mentions = self._expected_episode_mentions(actions)
+        mentioned_catalog = {
+            ident
+            for ident in CATALOG_STALE_IDENTIFIERS
+            if _identifier_mentioned(issues_norm, ident)
+        }
+        spurious = sorted(m for m in mentioned_catalog if m not in expected_mentions)
+        if spurious:
+            spam_pen = self.R_SPURIOUS_STALE_MENTION * len(spurious)
+            total += spam_pen
+            info["spurious_mentions"] = spurious
+            info["breakdown"]["spurious_stale_mentions"] = spam_pen
+        else:
+            info["spurious_mentions"] = []
+
         n = len(actions)
         nc = len(info["caught"])
         info["recall"] = nc / max(1, n)
@@ -305,7 +345,7 @@ class RewardScorer:
         mal = "yes" if info["malformed_issues"] else "no"
         info["metric_strip"] = (
             f"reward={total:+.2f} | recall={info['recall']:.0%} | verdict={verdict} | "
-            f"malformed_issues={mal} | grounded_in_diff={ng}/{n}"
+            f"malformed_issues={mal} | grounded_in_diff={ng}/{n} | spurious={len(info['spurious_mentions'])}"
         )
         info["judge_emoji"] = verdict_emoji(info, total)
         info["judge_summary"] = judge_summary_line(info, total)
@@ -360,3 +400,23 @@ class RewardScorer:
     def _stale_key(self, action: DriftAction) -> str:
         bare = action.stale_ref.split("(")[0]
         return f"{action.drift_type}:{bare}"
+
+    def _expected_episode_mentions(self, actions: list[DriftAction]) -> set[str]:
+        """
+        Stale identifiers that are valid to mention for this episode.
+
+        Includes file-module form for removal drifts.
+        """
+        out: set[str] = set()
+        for action in actions:
+            bare = action.stale_ref.split("(")[0].lower()
+            if bare:
+                out.add(bare)
+            cur = action.current_ref.split("(")[0].lower()
+            if cur and cur != "[deleted]":
+                out.add(cur)
+            if action.drift_type == "removal":
+                mod = str(action.metadata.get("module", "")).strip().lower()
+                if mod:
+                    out.add(mod)
+        return out
