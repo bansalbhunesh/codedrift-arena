@@ -8,10 +8,10 @@ echoing the codebase into REASON alone.
 Identifiers (function names) use word-boundary matching to reduce substring
 false positives (e.g. ``getUserDatab`` should not match ``getUserData``).
 
-**Diff grounding** (``info["diff_grounding"]``) is diagnostic only: it checks
-whether each ground-truth stale artifact appears as text in the PR diff. It
-does **not** change the reward—judges use it to spot ISSUES token-stuffing
-without diff support.
+**Diff grounding** (``info["diff_grounding"]``) checks whether each ground-truth
+stale artifact appears as text in the PR diff. Grounding now softly affects
+reward for caught drift: ungrounded catches receive reduced credit, while full
+grounding keeps full catch reward.
 """
 
 from __future__ import annotations
@@ -119,7 +119,7 @@ def judge_keyword_line(info: dict) -> str:
 
 
 def _stale_token_in_pr_diff(action: DriftAction, pr_diff: str) -> bool:
-    """Heuristic: stale artifact text appears in the diff (diagnostic, not used for reward)."""
+    """Heuristic: stale artifact text appears in the diff."""
     d = (pr_diff or "").lower()
     if not d.strip():
         return False
@@ -212,6 +212,7 @@ class RewardScorer:
     R_FALSE_REJECTION = -0.3
     R_PARTIAL_CREDIT = 0.4
     R_SPURIOUS_STALE_MENTION = -0.25
+    R_UNGROUNDED_CATCH_SCALE = 0.7
 
     @staticmethod
     def _parse_issues_section(response: str) -> str | None:
@@ -282,14 +283,24 @@ class RewardScorer:
         if info["malformed_issues"] and verdict == "APPROVE":
             info["warning"] = "malformed_issues_with_approve_on_drifted_pr"
 
+        diff_available = bool((pr_diff or "").strip())
+        grounds = []
         for action in actions:
             key = self._stale_key(action)
             mentioned = self._mentioned(action, issues_norm)
+            grounded = _stale_token_in_pr_diff(action, pr_diff)
+            grounds.append({"key": key, "stale_token_in_pr_diff": grounded})
 
             if mentioned and verdict == "REQUEST_CHANGES":
-                total += self.R_CAUGHT_STALE
+                reward_delta = self.R_CAUGHT_STALE
+                if diff_available and not grounded:
+                    reward_delta *= self.R_UNGROUNDED_CATCH_SCALE
+                total += reward_delta
                 info["caught"].append(key)
-                info["breakdown"][f"caught_{key}"] = self.R_CAUGHT_STALE
+                if grounded:
+                    info["breakdown"][f"caught_{key}"] = reward_delta
+                else:
+                    info["breakdown"][f"caught_ungrounded_{key}"] = reward_delta
 
             elif mentioned and verdict == "APPROVE":
                 total += self.R_PARTIAL_CREDIT
@@ -330,13 +341,6 @@ class RewardScorer:
         else:
             info["episode_outcome"] = "missed_all"
 
-        grounds = [
-            {
-                "key": self._stale_key(a),
-                "stale_token_in_pr_diff": _stale_token_in_pr_diff(a, pr_diff),
-            }
-            for a in actions
-        ]
         info["diff_grounding"] = grounds
         ng = sum(1 for g in grounds if g["stale_token_in_pr_diff"])
         info["diff_grounded_count"] = ng

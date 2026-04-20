@@ -251,6 +251,28 @@ class TestRewardScorer(unittest.TestCase):
         self.assertGreater(len(info_spam.get("spurious_mentions", [])), 0)
         self.assertIn("spurious_stale_mentions", info_spam.get("breakdown", {}))
 
+    def test_ungrounded_catch_gets_reduced_credit(self) -> None:
+        """Catches without stale token evidence in diff should receive scaled reward."""
+        a = DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={},
+        )
+        text = "VERDICT: REQUEST_CHANGES\nISSUES: getUserData is stale\nREASON: x.\n"
+        grounded, info_g = self.s.score(text, [a], "+x = getUserData(uid)\n")
+        ungrounded, info_u = self.s.score(text, [a], "+x = some_other_call(uid)\n")
+
+        self.assertAlmostEqual(grounded, self.s.R_CAUGHT_STALE)
+        self.assertAlmostEqual(
+            ungrounded,
+            self.s.R_CAUGHT_STALE * self.s.R_UNGROUNDED_CATCH_SCALE,
+        )
+        self.assertGreater(grounded, ungrounded)
+        self.assertEqual(info_g.get("diff_grounded_count"), 1)
+        self.assertEqual(info_u.get("diff_grounded_count"), 0)
+        self.assertIn("caught_ungrounded_rename:getUserData", info_u.get("breakdown", {}))
+
     def test_no_spurious_penalty_for_expected_removal_module(self) -> None:
         """Removal drifts may reference stale file path or dotted module without penalty."""
         a = DriftAction(

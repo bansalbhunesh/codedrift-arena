@@ -231,7 +231,7 @@ class CodeDriftEnv:
         """Compact state for demos / remote debugging (no large blobs)."""
         return {
             "episode_id": self._episode_id,
-            "episode_ready": self._episode_ready,
+            "episode_ready": self.is_ready_for_step,
             "difficulty": self.difficulty,
             "n_stale_refs": len(self._actions),
             "drift_version": getattr(self._drifted, "version", None),
