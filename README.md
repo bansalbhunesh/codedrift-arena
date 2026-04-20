@@ -33,9 +33,10 @@ python -m unittest discover -s tests -p "test_*.py" -v
 
 Optional narrative scripts: `python demo/before_after.py` (rename, contract, deleted-module, **two drifts at once**); `python demo/pitch_demo.py` mirrors those plus pitch framing (`--scenario rename|contract|removal|multi|all`, default `all`).
 
-After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`reward`, `recall`, `verdict`, `malformed_issues`, **`grounded_in_diff`**). **`info["judge_keyword_line"]`** is a visceral headline (**`🟢 SUCCESS: …`** / **`🔴 FAILURE: …`** / partial). **`info["judge_emoji"]`** / **`info["judge_summary"]`** add **visual + plain-English** hints. **`info["judge_why_matters"]`** ties the outcome to **production impact**. **`info["confidence_strip"]`** is a **short** HIGH/MEDIUM/LOW line (e.g. `confidence: HIGH (fully grounded + full recall)`). Gradio Status shows **keyword**, emoji strip, summary, **💡 why**, then confidence. **`info["diff_grounding"]`** is **diagnostic only** (reward still uses **`ISSUES:`** only).
+After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`reward`, `recall`, `verdict`, `malformed_issues`, **`grounded_in_diff`**). **`info["judge_keyword_line"]`** is a visceral headline (**`🟢 SUCCESS: …`** / **`🔴 FAILURE: …`** / partial). **`info["judge_emoji"]`** / **`info["judge_summary"]`** add **visual + plain-English** hints. **`info["judge_why_matters"]`** ties the outcome to **production impact**. **`info["confidence_strip"]`** is a **short** HIGH/MEDIUM/LOW line (e.g. `confidence: HIGH (fully grounded + full recall)`). Gradio Status shows **keyword**, emoji strip, summary, **💡 why**, then confidence.
 
-**Slide-ready curve (placeholder):** see [`demo/sample_training_curve.md`](demo/sample_training_curve.md) — swap in real metrics when you have them.
+**Training evidence artifact:** see [`demo/sample_training_curve.md`](demo/sample_training_curve.md).  
+Use this file for your latest run summary (steps, rewards, and caveats). If you haven't run training yet, keep it explicitly marked as illustrative.
 
 **Hugging Face Space:** use root `app.py`, root `requirements.txt` (CPU). See [`hf_space/README.md`](hf_space/README.md) for Space wiring.
 
@@ -80,7 +81,8 @@ REASON: one sentence.
 
 **Scoring intuition (drifted PR):** credit comes from citing **stale** symbols / old signatures in **`ISSUES`**, with **`REQUEST_CHANGES`** when appropriate. Mentioning only the **new** name does not count as catching drift. Clean PRs (`n_stale_refs == 0`) expect **`VERDICT: APPROVE`** with **`ISSUES: none`** (or equivalent).
 
-**Important:** `RewardScorer` does **not** read the PR diff when deciding mentions—it only parses **`ISSUES:`** (plus explicit **`VERDICT:`**). Evidence the model cites must appear under **`ISSUES:`**, not only in free-form text elsewhere.
+**Important:** `RewardScorer` parses mentions from **`ISSUES:`** (plus explicit **`VERDICT:`**).  
+Diff grounding is also tracked and now softly affects catch reward when a non-empty diff is provided, while ISSUES remains the primary evidence channel.
 
 **Pitch honesty:** The rubric scores **coverage of known drift** (did ISSUES cite the right stale artifacts with the right verdict shape)—not whether every sentence of reasoning is factually perfect.
 

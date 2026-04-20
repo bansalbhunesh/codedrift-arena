@@ -1,6 +1,10 @@
-# Illustrative training curve (judge deck)
+# Training run summary (update with latest run)
 
-**Not from a live run** — placeholder numbers so you can show an **upward reward story** if real W&B curves are still noisy. Replace with your actual `trl` / W&B export before finals.
+Use this page as the single source of truth for training evidence shown to judges.
+If values are illustrative, keep them clearly marked; before submission, replace
+with real run exports/logs.
+
+## Current values (illustrative example)
 
 | Checkpoint | Mean reward (batch) | Notes |
 |-------------|---------------------|--------|
