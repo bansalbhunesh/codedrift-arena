@@ -2,11 +2,12 @@
 CodeDrift Arena — GRPO Training Script
 Model:   Qwen2.5-1.5B-Instruct  (fits T4 free Colab, ~8GB VRAM)
 Trainer: HuggingFace TRL GRPOTrainer
-Quant:   Unsloth 4-bit LoRA
-"""
+Quant:   bitsandbytes 4-bit QLoRA (no Unsloth dependency)
 
-from unsloth import FastLanguageModel
-from trl import GRPOConfig, GRPOTrainer
+Root cause of previous crashes: Unsloth monkey-patches TRL internals via
+sampling_params.split("\n")[-2], which breaks when TRL version changes.
+This version uses the stable HF stack only.
+"""
 
 import argparse
 import hashlib
@@ -45,7 +46,6 @@ def _row_primary_stale_key(row: dict) -> str:
 
 def _stable_holdout_bucket(key: str, seed: int) -> float:
     digest = hashlib.sha1(f"{seed}:{key}".encode("utf-8")).hexdigest()
-    # 32-bit bucket for deterministic split in [0, 1).
     return int(digest[:8], 16) / 0xFFFFFFFF
 
 
@@ -56,7 +56,6 @@ def split_train_eval_rows(rows: list[dict], holdout_fraction: float, seed: int) 
     for row in rows:
         key = _row_primary_stale_key(row)
         if key == "clean:none":
-            # Keep clean rows in train to stabilize conservative defaults.
             train_rows.append(row)
             continue
         bucket = _stable_holdout_bucket(key, seed)
@@ -78,7 +77,6 @@ def build_dataset_rows(n_episodes: int, difficulty: str, personality: str, seed:
     for _ in range(n_episodes):
         obs = env.reset()
         serialized_actions = _serialize_actions(env.stale_actions)
-
         rows.append(
             {
                 "prompt": obs.prompt,
@@ -108,30 +106,16 @@ def build_dataset_rows(n_episodes: int, difficulty: str, personality: str, seed:
         )
 
     import random
-
     rng = random.Random(seed)
     rng.shuffle(rows)
     return rows
-
-
-def build_dataset(n_episodes: int, difficulty: str, personality: str, seed: int = 42):
-    """Returns HuggingFace Dataset for training."""
-    from datasets import Dataset
-
-    rows = build_dataset_rows(
-        n_episodes=n_episodes,
-        difficulty=difficulty,
-        personality=personality,
-        seed=seed,
-    )
-    return Dataset.from_list(rows)
 
 
 def make_reward_fn(difficulty: str):
     from agents.drift_agent import DriftAction
     from rewards.scorer import RewardScorer
 
-    _ = difficulty  # reserved for curriculum / logging
+    _ = difficulty
     scorer = RewardScorer()
     log = logging.getLogger("codedrift.train.reward")
 
@@ -139,11 +123,10 @@ def make_reward_fn(difficulty: str):
         rewards = []
         n = len(completions)
         if serialized_actions is not None and len(serialized_actions) != n:
-            raise ValueError(
-                f"serialized_actions length {len(serialized_actions)} != completions {n}"
-            )
+            raise ValueError(f"serialized_actions length {len(serialized_actions)} != completions {n}")
         if pr_diff is not None and len(pr_diff) != n:
             raise ValueError(f"pr_diff length {len(pr_diff)} != completions {n}")
+
         for i, completion in enumerate(completions):
             try:
                 raw = serialized_actions[i] if serialized_actions is not None else "[]"
@@ -181,15 +164,10 @@ def make_reward_fn(difficulty: str):
                 rewards.append(float(reward))
             except Exception:
                 log.exception("reward_fn_row_failed batch_index=%s", i)
-                # Match max per-action miss penalty scale (~[-3, +3]) so curves stay interpretable.
                 rewards.append(-1.0)
 
         if len(rewards) != n:
-            log.error(
-                "reward_fn length mismatch: got %d rewards for batch size %d",
-                len(rewards),
-                n,
-            )
+            log.error("reward_fn length mismatch: got %d rewards for batch size %d", len(rewards), n)
             if len(rewards) < n:
                 rewards.extend([-1.0] * (n - len(rewards)))
             else:
@@ -199,28 +177,48 @@ def make_reward_fn(difficulty: str):
     return reward_fn
 
 
-def _instantiate_grpo_trainer(GRPOTrainer, *, model, tokenizer, config, train_dataset, reward_fn):
-    """Support TRL API changes (``args`` / ``processing_class`` vs legacy ``config`` / ``tokenizer``)."""
-    import inspect
+def load_model_and_tokenizer(model_name: str):
+    """
+    Load model with 4-bit QLoRA using standard HF stack (no Unsloth).
+    Works reliably on any TRL version without monkey-patch crashes.
+    """
+    from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+    from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+    import torch
 
-    params = inspect.signature(GRPOTrainer.__init__).parameters
-    kwargs = dict(model=model, reward_funcs=reward_fn, train_dataset=train_dataset)
-    if "args" in params:
-        kwargs["args"] = config
-    elif "config" in params:
-        kwargs["config"] = config
-    else:
-        kwargs["args"] = config
-    if "processing_class" in params:
-        kwargs["processing_class"] = tokenizer
-    elif "tokenizer" in params:
-        kwargs["tokenizer"] = tokenizer
-    else:
-        raise TypeError(
-            "GRPOTrainer has neither processing_class nor tokenizer; "
-            "upgrade/downgrade trl or extend _instantiate_grpo_trainer."
-        )
-    return GRPOTrainer(**kwargs)
+    print("Loading tokenizer...")
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
+
+    print("Loading model in 4-bit...")
+    bnb_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_quant_type="nf4",
+        bnb_4bit_use_double_quant=True,
+        bnb_4bit_compute_dtype=torch.bfloat16,
+    )
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        quantization_config=bnb_config,
+        device_map="auto",
+        trust_remote_code=True,
+    )
+    model = prepare_model_for_kbit_training(model)
+
+    lora_config = LoraConfig(
+        r=16,
+        lora_alpha=16,
+        target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+        lora_dropout=0.05,
+        bias="none",
+        task_type="CAUSAL_LM",
+    )
+    model = get_peft_model(model, lora_config)
+    model.print_trainable_parameters()
+
+    return model, tokenizer
 
 
 def train(args):
@@ -232,27 +230,13 @@ def train(args):
     print(f"  Personality: {args.personality}")
     print(f"  Steps:       {args.steps}")
     print(f"  Episodes:    {args.episodes}")
-    print(f"  HF dataset:  {cfg.HF_DATASET_REPO or '(unset — set CODEDRIFT_HF_DATASET_REPO)'}")
-    print(f"  HF model:    {cfg.HF_MODEL_REPO or '(unset — set CODEDRIFT_HF_MODEL_REPO)'}")
-    print(f"  W&B project: {cfg.WANDB_PROJECT or '(unset)'}\n")
+    print(f"  Backend:     HuggingFace TRL + bitsandbytes (no Unsloth)\n")
 
-    print("Loading model...")
-    model, tokenizer = FastLanguageModel.from_pretrained(
-        model_name=args.model,
-        max_seq_length=2048,
-        load_in_4bit=True,
-    )
-    model = FastLanguageModel.get_peft_model(
-        model,
-        r=16,
-        target_modules=["q_proj", "v_proj"],
-        lora_alpha=16,
-        lora_dropout=0.0,
-        bias="none",
-        use_gradient_checkpointing=True,
-    )
-
+    from trl import GRPOConfig, GRPOTrainer
     from datasets import Dataset
+    import inspect
+
+    model, tokenizer = load_model_and_tokenizer(args.model)
 
     print("Building dataset...")
     rows = build_dataset_rows(
@@ -263,10 +247,8 @@ def train(args):
     )
     train_rows, eval_rows = split_train_eval_rows(rows, args.heldout_fraction, args.seed)
     dataset = Dataset.from_list(train_rows)
-    print(
-        f"Dataset: train={len(train_rows)} rows, heldout_eval={len(eval_rows)} rows "
-        f"(heldout_fraction={args.heldout_fraction:.2f})"
-    )
+    print(f"Dataset: train={len(train_rows)} rows, heldout_eval={len(eval_rows)} rows")
+
     if args.eval_split_out:
         out = Path(args.eval_split_out)
         out.parent.mkdir(parents=True, exist_ok=True)
@@ -278,27 +260,30 @@ def train(args):
     config = GRPOConfig(
         output_dir=args.output_dir,
         max_steps=args.steps,
-        per_device_train_batch_size=2,
-        gradient_accumulation_steps=8,
+        per_device_train_batch_size=1,
+        gradient_accumulation_steps=4,
         learning_rate=5e-5,
-        warmup_steps=20,
-        logging_steps=10,
-        save_steps=100,
+        warmup_steps=10,
+        logging_steps=5,
+        save_steps=200,
         report_to="none",
         num_generations=4,
         max_prompt_length=1024,
         max_completion_length=256,
         temperature=0.8,
+        bf16=True,
     )
 
-    trainer = _instantiate_grpo_trainer(
-        GRPOTrainer,
-        model=model,
-        tokenizer=tokenizer,
-        config=config,
-        train_dataset=dataset,
-        reward_fn=reward_fn,
-    )
+    # Safely instantiate GRPOTrainer across TRL versions
+    params = inspect.signature(GRPOTrainer.__init__).parameters
+    trainer_kwargs = dict(model=model, reward_funcs=reward_fn, train_dataset=dataset)
+    trainer_kwargs["args"] = config
+    if "processing_class" in params:
+        trainer_kwargs["processing_class"] = tokenizer
+    elif "tokenizer" in params:
+        trainer_kwargs["tokenizer"] = tokenizer
+
+    trainer = GRPOTrainer(**trainer_kwargs)
 
     print("Training...\n")
     trainer.train()
