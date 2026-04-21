@@ -7,8 +7,8 @@
 | | |
 |--|--|
 | **Repo** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
-| **Live demo** | Hugging Face Space: set `CODEDRIFT_HF_SPACE_URL` in `.env` or paste your Space URL here after deploy |
-| **Stack** | Python · Gradio (CPU demo) · TRL GRPO + Unsloth (optional GPU train) · OpenEnv HTTP bridge (optional) |
+| **🚀 Live Demo** | [![HF Space](https://img.shields.io/badge/🤗%20HuggingFace-Space-blue)](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) |
+| **Stack** | Python · Gradio (CPU demo) · TRL GRPO + bitsandbytes QLoRA (GPU train) · OpenEnv HTTP bridge |
 
 ---
 
@@ -186,8 +186,8 @@ Set `CODEDRIFT_LOG_LEVEL=DEBUG` for verbose logs (`codedrift/logutil.py`). Episo
 
 ## Contributing / hackathon fork checklist
 
-- [ ] Deploy Space and add the URL to your deck + `CODEDRIFT_HF_SPACE_URL`.
+- [x] Deploy Space → **Live at https://huggingface.co/spaces/Bhuneshlooper/CodeDrift**
 - [ ] Run `python scripts/smoke_env.py` and unit tests before recording.
-- [ ] Rehearse: one **New episode** → paste review → **Score review** → **New episode** again.
+- [ ] Rehearse: one **New episode** → click **▶ Load Trained Model** → **Score review** → **New episode** again.
 
 Questions or tight demo slots: open an issue on the repo with your Space link and intended model backend (optional).
