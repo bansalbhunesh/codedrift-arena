@@ -197,11 +197,12 @@ def load_model_and_tokenizer(model_name: str):
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_use_double_quant=True,
-        bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_compute_dtype=torch.float16,  # bf16 not supported on T4
     )
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
+        torch_dtype=torch.float16,
         device_map="auto",
         trust_remote_code=True,
     )
@@ -271,7 +272,7 @@ def train(args):
         max_prompt_length=1024,
         max_completion_length=256,
         temperature=0.8,
-        bf16=True,
+        fp16=True,  # T4 supports fp16, not bf16
     )
 
     # Safely instantiate GRPOTrainer across TRL versions
