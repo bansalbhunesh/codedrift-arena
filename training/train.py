@@ -5,8 +5,8 @@ Trainer: HuggingFace TRL GRPOTrainer
 Quant:   Unsloth 4-bit LoRA
 """
 
-from trl import GRPOConfig, GRPOTrainer
 from unsloth import FastLanguageModel
+from trl import GRPOConfig, GRPOTrainer
 
 import argparse
 import hashlib
