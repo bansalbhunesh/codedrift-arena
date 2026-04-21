@@ -135,7 +135,7 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
         )
 
 
-with gr.Blocks(title="CodeDrift Arena", theme=gr.themes.Soft()) as demo:
+with gr.Blocks(title="CodeDrift Arena") as demo:
     gr.Markdown(
         "# 🏟️ CodeDrift Arena\n"
         "**The Challenge:** Today's codebase has changed, but the PR still assumes yesterday's schema. "
@@ -170,7 +170,13 @@ with gr.Blocks(title="CodeDrift Arena", theme=gr.themes.Soft()) as demo:
 
     with gr.Row():
         with gr.Column():
-            pr_diff = gr.Code(label="PR Diff (Review Target)", language="diff", lines=12)
+            pr_diff = gr.Textbox(
+                label="PR Diff (Review Target)",
+                lines=12,
+                max_lines=20,
+                interactive=False,
+                elem_id="pr_diff_box",
+            )
             codebase = gr.Textbox(label="Current Codebase State (Reality)", lines=12)
             prompt = gr.Textbox(label="Full Model Prompt (Context)", lines=5, max_lines=10)
         
