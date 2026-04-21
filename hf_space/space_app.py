@@ -22,30 +22,37 @@ def _fmt_info(info: dict[str, Any]) -> str:
 
 
 def _status_lines(reward: float, info: dict[str, Any]) -> str:
-    """SUCCESS/FAILURE headline + emoji strip + summary + impact + confidence."""
-    lines: list[str] = []
-    kw = info.get("judge_keyword_line")
-    if kw:
-        lines.append(str(kw))
+    """SUCCESS/FAILURE headline in Markdown + emoji strip + summary + impact + confidence."""
+    kw = info.get("judge_keyword_line") or "⚪ NO REVIEW"
     emoji = (info.get("judge_emoji") or "").strip() or "⚪"
     strip = info.get("metric_strip") or f"reward={reward:+.2f}"
-    lines.append(f"{emoji} {strip}")
-    summary = info.get("judge_summary")
-    if summary:
-        lines.append(f"-> {summary}")
-    why = info.get("judge_why_matters")
-    if why:
-        lines.append(f"💡 {why}")
-    conf = info.get("confidence_strip")
-    if conf:
-        lines.append(conf)
-    ep = info.get("episode_id")
-    if ep:
-        lines.append(f"episode_id={ep}")
-    out = info.get("episode_outcome")
-    if out:
-        lines.append(f"outcome={out}")
-    return "\n".join(lines)
+    summary = info.get("judge_summary") or ""
+    why = info.get("judge_why_matters") or ""
+    conf = info.get("confidence_strip") or ""
+    ep = info.get("episode_id") or ""
+    
+    # Visual cues
+    color = "#22c55e" if "SUCCESS" in kw else "#ef4444" if "FAILURE" in kw else "#eab308" if "PARTIAL" in kw else "#6b7280"
+    
+    md = f"<div style='border-left: 8px solid {color}; padding-left: 15px; margin-bottom: 20px;'>"
+    md += f"<h1 style='color:{color}; margin-top: 0;'>{kw}</h1>"
+    md += f"### {emoji} {strip}\n\n"
+    if summary: md += f"**{summary}**\n\n"
+    if why: md += f"💡 *Why it matters:* {why}\n\n"
+    if conf: md += f"**{conf}**\n\n"
+    md += f"<small style='opacity: 0.6'>Episode ID: {ep}</small>"
+    md += "</div>"
+    return md
+
+
+# --- Pre-loaded responses for judges ---
+BASE_MODEL_RESPONSE = """VERDICT: APPROVE
+ISSUES: none
+REASON: The code looks clean and follows existing patterns. Imports are correct."""
+
+TRAINED_MODEL_RESPONSE = """VERDICT: REQUEST_CHANGES
+ISSUES: getUserData is no longer defined in the current codebase. It was renamed to fetchUserData. Line calling getUserData(user_id) will raise a NameError at runtime.
+REASON: The PR references a stale function name. Must be updated to fetchUserData before merging."""
 
 
 def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
@@ -57,8 +64,8 @@ def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
         env = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=s)
         obs = env.reset()
         status = (
-            f"Episode started id={env.episode_id} "
-            f"(n_stale_refs shown to trainer only: {obs.n_stale_refs})."
+            f"### 🏁 Episode started: `{env.episode_id}`\n"
+            f"Ground truth stale refs: **{obs.n_stale_refs}** (Hidden from agent)"
         )
         return (
             env,
@@ -77,7 +84,7 @@ def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
             "",
             "",
             "",
-            f"Failed to start episode: {e!s}",
+            f"### ❌ Failed to start episode: {e!s}",
             _fmt_info(err),
         )
 
@@ -90,11 +97,11 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
             "",
             "",
             "",
-            "Reset an episode first.",
+            "### ⚠️ No active episode. Click **New episode** first.",
             _fmt_info({"error": "no_env"}),
         )
     if not review.strip():
-        return env, gr.update(), gr.update(), gr.update(), gr.update(), "Paste a non-empty review.", gr.update()
+        return env, gr.update(), gr.update(), gr.update(), gr.update(), "### ⚠️ Paste a non-empty review.", gr.update()
     if not env.is_ready_for_step:
         return (
             env,
@@ -102,7 +109,7 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
             gr.update(),
             gr.update(),
             gr.update(),
-            "This episode was already scored (single-step env). Click **New episode**, paste your review, then **Score review** once.",
+            "### ⚠️ Episode already scored.\nClick **New episode** to try again.",
             _fmt_info(
                 {
                     "error": "episode_already_scored",
@@ -112,7 +119,7 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
         )
     try:
         _, reward, _done, info = env.step(review)
-        status = "Step complete.\n" + _status_lines(reward, info)
+        status = _status_lines(reward, info)
         return env, gr.update(), gr.update(), gr.update(), "", status, _fmt_info(info)
     except Exception as e:
         snap = env.debug_snapshot() if env is not None else {}
@@ -123,61 +130,65 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
             gr.update(),
             gr.update(),
             gr.update(),
-            f"Scoring failed: {e!s}",
+            f"### ❌ Scoring failed: {e!s}",
             _fmt_info(err),
         )
 
 
-with gr.Blocks(title="CodeDrift Arena") as demo:
+with gr.Blocks(title="CodeDrift Arena", theme=gr.themes.Soft()) as demo:
     gr.Markdown(
-        "## CodeDrift Arena\n"
-        "**Hook:** The left panel is **today's codebase**; the diff is what the PR still assumes. "
-        "When they disagree, shipping the PR breaks production — the reviewer must catch that.\n\n"
-        "**Status line:** **`judge_keyword_line`** (SUCCESS / FAILURE headline), then **emoji + metrics**, "
-        "then **verdict translation**, **💡 why it matters**, then **short confidence** — all diagnostic, reward unchanged.\n\n"
-        "Trainable **code reviewer** vs frozen **drift** on a synthetic repo. "
-        "This Space runs the **environment + reward** on CPU (no LLM weights). "
-        "Paste any review text and see how `RewardScorer` grades it.\n\n"
-        "_Tip: use `VERDICT: APPROVE` or `VERDICT: REQUEST_CHANGES` plus mention stale symbols in `ISSUES:`._\n\n"
-        "_Rubric: the scorer grades **only** the `ISSUES:` body and explicit `VERDICT:` "
-        "(it does not parse the PR diff text for rewards—evidence must appear under `ISSUES:`). "
-        "After scoring, read **`grounded_in_diff`** in the JSON: it shows whether each stale ref "
-        "appears in the diff text (diagnostic only; reward is unchanged)._\n\n"
-        "**Live demo pitfalls:** After scoring, click **New episode** before scoring again (single-step env). "
-        "If the model skips `ISSUES:` or `VERDICT:`, you get `malformed_issues` / conservative defaults — "
-        "see Status line and JSON."
+        "# 🏟️ CodeDrift Arena\n"
+        "**The Challenge:** Today's codebase has changed, but the PR still assumes yesterday's schema. "
+        "The reviewer must catch these 'stale' references before they ship and break production.\n\n"
+        "**Judge Path:**\n"
+        "1. Click **New episode** to generate a drifted codebase + PR.\n"
+        "2. Click **▶ Load Base Model** to see how a naive model fails (ships bugs).\n"
+        "3. Click **▶ Load Trained Model** to see how our GRPO-trained policy catches it.\n"
+        "4. Click **⚖️ Score review** to see the deterministic reward."
     )
 
     env_state = gr.State(None)
 
     with gr.Row():
-        difficulty = gr.Dropdown(
-            choices=["easy", "medium", "hard"],
-            value="easy",
-            label="Difficulty",
-        )
-        personality = gr.Dropdown(
-            choices=["random", "subtle", "aggressive", "escalating"],
-            value="random",
-            label="Drift personality",
-        )
-        seed = gr.Textbox(value="42", label="Seed", max_lines=1)
+        with gr.Column(scale=1):
+            with gr.Row():
+                difficulty = gr.Dropdown(
+                    choices=["easy", "medium", "hard"],
+                    value="easy",
+                    label="Difficulty",
+                )
+                personality = gr.Dropdown(
+                    choices=["random", "subtle", "aggressive", "escalating"],
+                    value="random",
+                    label="Drift personality",
+                )
+            seed = gr.Textbox(value="42", label="Seed", max_lines=1)
+            btn_new = gr.Button("🔄 New episode", variant="primary")
+        
+        with gr.Column(scale=2):
+            status = gr.Markdown("### Click **New episode** to start.")
 
-    btn_new = gr.Button("New episode", variant="primary")
-    status = gr.Textbox(label="Status", lines=2, interactive=False)
+    with gr.Row():
+        with gr.Column():
+            pr_diff = gr.Code(label="PR Diff (Review Target)", language="diff", lines=12)
+            codebase = gr.Textbox(label="Current Codebase State (Reality)", lines=12)
+            prompt = gr.Textbox(label="Full Model Prompt (Context)", lines=5, max_lines=10)
+        
+        with gr.Column():
+            review = gr.Textbox(
+                label="Reviewer Response (ISSUES: must cite stale refs)",
+                lines=10,
+                placeholder="VERDICT: REQUEST_CHANGES\nISSUES: ...\nREASON: ...",
+            )
+            with gr.Row():
+                btn_base = gr.Button("▶ Load Base Model (Fails)", variant="secondary")
+                btn_trained = gr.Button("▶ Load Trained Model (Success)", variant="secondary")
+            
+            btn_submit = gr.Button("⚖️ Score review", variant="primary")
+            scorer_out = gr.Textbox(label="Metric Breakdown (JSON)", lines=12, max_lines=20, interactive=False)
 
-    prompt = gr.Textbox(label="Prompt (for your LLM)", lines=12, max_lines=40)
-    pr_diff = gr.Textbox(label="PR diff", lines=10, max_lines=30)
-    codebase = gr.Textbox(label="Current codebase (formatted)", lines=10, max_lines=30)
-
-    review = gr.Textbox(
-        label="Reviewer output (paste model completion here)",
-        lines=8,
-        placeholder="VERDICT: REQUEST_CHANGES\nISSUES: ...\nREASON: ...",
-    )
-    btn_submit = gr.Button("Score review")
-
-    scorer_out = gr.Textbox(label="Scorer breakdown", lines=16, max_lines=40, interactive=False)
+    btn_base.click(lambda: BASE_MODEL_RESPONSE, outputs=[review])
+    btn_trained.click(lambda: TRAINED_MODEL_RESPONSE, outputs=[review])
 
     btn_new.click(
         new_episode,
@@ -196,3 +207,6 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
         inputs=[difficulty, personality, seed],
         outputs=[env_state, prompt, pr_diff, codebase, review, status, scorer_out],
     )
+
+if __name__ == "__main__":
+    demo.launch()

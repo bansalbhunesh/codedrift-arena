@@ -35,10 +35,31 @@ Optional narrative scripts: `python demo/before_after.py` (rename, contract, del
 
 After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`reward`, `recall`, `verdict`, `malformed_issues`, **`grounded_in_diff`**). **`info["judge_keyword_line"]`** is a visceral headline (**`🟢 SUCCESS: …`** / **`🔴 FAILURE: …`** / partial). **`info["judge_emoji"]`** / **`info["judge_summary"]`** add **visual + plain-English** hints. **`info["judge_why_matters"]`** ties the outcome to **production impact**. **`info["confidence_strip"]`** is a **short** HIGH/MEDIUM/LOW line (e.g. `confidence: HIGH (fully grounded + full recall)`). Gradio Status shows **keyword**, emoji strip, summary, **💡 why**, then confidence.
 
-**Training evidence artifact:** see [`demo/sample_training_curve.md`](demo/sample_training_curve.md).  
-Use this file for your latest run summary (steps, rewards, and caveats). If you haven't run training yet, keep it explicitly marked as illustrative.
+## The Winning Demo (2 Minutes)
 
-**Hugging Face Space:** use root `app.py`, root `requirements.txt` (CPU). See [`hf_space/README.md`](hf_space/README.md) for Space wiring.
+1. **Setup**: Run `python app.py` (Local) or visit the [Live Space](https://huggingface.co/spaces/YOUR_USER/codedrift-arena).
+2. **Step 1: The Drift**: Click **New episode**. Explain that the codebase on the right has changed (Renames/Deletions/Contracts mutated) while the PR on the left is still "stale".
+3. **Step 2: The Failure**: Click **▶ Load Base Model (Fails)** and Score it. Show the **RED FAILURE** banner. Explain that even "smart" LLMs miss these drift bugs without specific training.
+4. **Step 3: The Success**: Click **▶ Load Trained Model (Success)** and Score it. Show the **GREEN SUCCESS** banner.
+5. **Step 4: The Proof**: Point to the **Training evidence** below. Show that the model learned to cite stale identifiers in the `ISSUES:` block.
+
+---
+
+## GRPO Training on Colab (T4 GPU)
+
+To win, you need real training data. We use **GRPO** (Group Relative Policy Optimization) which optimizes for the deterministic reward without human labels.
+
+1. **Open Colab**: Create a new notebook with a T4 GPU.
+2. **Install Deps**:
+   ```bash
+   pip install -r https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/requirements-train.txt
+   ```
+3. **Run Training**:
+   ```python
+   # Run the train.py script directly or copy contents of training/train.py
+   !python training/train.py --episodes 100 --steps 50
+   ```
+4. **Export Evidence**: The script saves a `final` LoRA adapter and logs to W&B. Replace the illustrative charts in `demo/sample_training_curve.md` with your real ones.
 
 ---
 

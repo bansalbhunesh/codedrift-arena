@@ -20,9 +20,10 @@ def smoke_core() -> bool:
     obs = env.reset()
     assert obs.prompt and obs.pr_diff
     _, reward, done, info = env.step(
-        "VERDICT: REQUEST_CHANGES\nISSUES: stale refs\nREASON: test.\n"
+        "VERDICT: REQUEST_CHANGES\nISSUES: services/v1_client.py was deleted but is still imported in the PR\nREASON: stale reference in diff.\n"
     )
     assert done is True
+    assert reward > 0.5  # Ensure we get positive reward for catching drift
     assert isinstance(reward, float)
     assert "episode_outcome" in info
     print("[ok] CodeDriftEnv reset/step")

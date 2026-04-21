@@ -5,6 +5,9 @@ Trainer: HuggingFace TRL GRPOTrainer
 Quant:   Unsloth 4-bit LoRA
 """
 
+from trl import GRPOConfig, GRPOTrainer
+from unsloth import FastLanguageModel
+
 import argparse
 import hashlib
 import json
@@ -222,12 +225,6 @@ def _instantiate_grpo_trainer(GRPOTrainer, *, model, tokenizer, config, train_da
 
 def train(args):
     configure_logging()
-    try:
-        from trl import GRPOConfig, GRPOTrainer
-        from unsloth import FastLanguageModel
-    except ImportError:
-        print("ERROR: Install training deps: pip install -r requirements-train.txt")
-        sys.exit(1)
 
     print("\nCodeDrift Arena Training")
     print(f"  Model:       {args.model}")
