@@ -267,7 +267,7 @@ def train(args):
         warmup_steps=10,
         logging_steps=5,
         save_steps=200,
-        report_to="none",
+        report_to="wandb",
         num_generations=4,
         max_prompt_length=1024,
         max_completion_length=256,
