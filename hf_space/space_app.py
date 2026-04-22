@@ -152,8 +152,8 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
             gr.update(),
             gr.update(),
             "### ⚠️ Paste a non-empty review.",
-            gr.update(),
-            gr.update(),
+            _adversary_brain_html(env),
+            _fmt_info({"error": "empty_review", "episode_id": env.episode_id}),
         )
     if not env.is_ready_for_step:
         return (

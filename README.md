@@ -37,7 +37,7 @@ After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`rewa
 
 ## The Winning Demo (2 Minutes)
 
-1. **Setup**: Run `python app.py` (Local) or visit the [Live Space](https://huggingface.co/spaces/YOUR_USER/codedrift-arena).
+1. **Setup**: Run `python app.py` (Local) or visit the [Live Space](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift).
 2. **Step 1: The Drift**: Click **New episode**. Explain that the codebase on the right has changed (Renames/Deletions/Contracts mutated) while the PR on the left is still "stale".
 3. **Step 2: The Failure**: Click **▶ Load Base Model (Fails)** and Score it. Show the **RED FAILURE** banner. Explain that even "smart" LLMs miss these drift bugs without specific training.
 4. **Step 3: The Success**: Click **▶ Load Trained Model (Success)** and Score it. Show the **GREEN SUCCESS** banner.
