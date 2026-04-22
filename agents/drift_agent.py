@@ -9,6 +9,7 @@ Personality modes control HOW it drifts:
   - aggressive:  applies all 3 drift types every episode
   - random:      uniform random selection (default, good for training)
   - escalating:  starts easy, gets harder as episode count increases
+  - adaptive:    adjusts strategy from reviewer win-rate (self-play curriculum)
 
 This framing earns the Fleet AI bonus prize:
   "We trained an oversight agent (reviewer) to monitor the behavior
@@ -106,6 +107,7 @@ class DriftAgent:
         self.personality = personality
         self.episode_count = 0
         self.rng = random.Random(seed)
+        self._reviewer_wins: list[bool] = []
 
     def act(self, codebase, difficulty: str = "easy") -> tuple:
         """
@@ -161,6 +163,20 @@ class DriftAgent:
             actual_count = level + 1
             pool = ["rename", "removal", "contract"]
             return self.rng.sample(pool, k=min(actual_count, len(pool)))
+
+        elif self.personality == "adaptive":
+            mode = self._adaptive_mode()
+            if mode == "aggressive":
+                pool = ["rename", "removal", "contract"]
+                return self.rng.sample(pool, k=min(base_count, len(pool)))
+            if mode == "subtle":
+                pool = ["contract", "contract", "rename", "removal"]
+                unique_pool = list(dict.fromkeys(pool))
+                k = min(base_count, len(unique_pool))
+                return self.rng.sample(unique_pool, k=k)
+            # warmup / struggling reviewer -> random
+            pool = ["rename", "removal", "contract"]
+            return self.rng.sample(pool, k=min(base_count, len(pool)))
 
         else:  # random
             pool = ["rename", "removal", "contract"]
@@ -227,3 +243,35 @@ class DriftAgent:
 
     def describe(self) -> str:
         return f"DriftAgent(personality={self.personality}, episodes_run={self.episode_count})"
+
+    def record_reviewer_result(self, reviewer_won: bool) -> None:
+        """Track reviewer success for adaptive curriculum mode."""
+        self._reviewer_wins.append(bool(reviewer_won))
+        # Keep only recent history used by _adaptive_mode().
+        if len(self._reviewer_wins) > 100:
+            self._reviewer_wins = self._reviewer_wins[-100:]
+
+    def recent_win_rate(self, window: int = 10) -> float:
+        """Reviewer win rate over the most recent ``window`` episodes."""
+        if window <= 0 or not self._reviewer_wins:
+            return 0.0
+        recent = self._reviewer_wins[-window:]
+        return sum(1 for x in recent if x) / len(recent)
+
+    def _adaptive_mode(self) -> str:
+        """
+        Choose strategy from reviewer performance.
+
+        - Warmup (<5 episodes): random
+        - win_rate > 0.8: aggressive
+        - win_rate > 0.5: subtle
+        - else: random
+        """
+        if len(self._reviewer_wins) < 5:
+            return "random"
+        wr = self.recent_win_rate(window=10)
+        if wr > 0.8:
+            return "aggressive"
+        if wr > 0.5:
+            return "subtle"
+        return "random"

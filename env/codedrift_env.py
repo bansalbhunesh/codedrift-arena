@@ -189,6 +189,9 @@ class CodeDriftEnv:
             info.get("episode_outcome"),
             info.get("verdict"),
         )
+        # Optional self-play curriculum signal for DriftAgent(personality="adaptive").
+        reviewer_won = bool(info.get("episode_outcome") == "perfect")
+        self.drift_agent.record_reviewer_result(reviewer_won)
         self._episode_ready = False
         return self._cached_reset_obs, reward, done, info
 

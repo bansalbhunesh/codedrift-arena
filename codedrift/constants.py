@@ -3,4 +3,4 @@
 from __future__ import annotations
 
 DIFFICULTIES = frozenset({"easy", "medium", "hard"})
-PERSONALITIES = frozenset({"random", "subtle", "aggressive", "escalating"})
+PERSONALITIES = frozenset({"random", "subtle", "aggressive", "escalating", "adaptive"})

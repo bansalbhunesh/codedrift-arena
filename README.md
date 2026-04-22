@@ -84,7 +84,7 @@ flowchart LR
   end
 ```
 
-- **`DriftAgent`** (`agents/drift_agent.py`) — frozen; personalities (`random`, `subtle`, `aggressive`, `escalating`) and difficulty (`easy` / `medium` / `hard`) control challenge.
+- **`DriftAgent`** (`agents/drift_agent.py`) — frozen; personalities (`random`, `subtle`, `aggressive`, `escalating`, `adaptive`) and difficulty (`easy` / `medium` / `hard`) control challenge.
 - **`CodeDriftEnv`** (`env/codedrift_env.py`) — builds observation, caches reset obs through the single `step` (see API notes below).
 - **`RewardScorer`** (`rewards/scorer.py`) — parses **`ISSUES:`** only for “did you cite the stale artifact?”; **`VERDICT:`** must be explicit.
 
