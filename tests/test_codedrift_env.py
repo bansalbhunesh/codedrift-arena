@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -58,6 +59,18 @@ class TestCodeDriftEnv(unittest.TestCase):
                 pr_diff="+no stale token here\n",
                 base=base,
             )
+
+    def test_step_truncates_oversized_agent_response(self) -> None:
+        os.environ["CODEDRIFT_MAX_AGENT_RESPONSE_CHARS"] = "32"
+        try:
+            env = CodeDriftEnv(difficulty="easy", seed=0)
+            env.reset()
+            huge = "VERDICT: REQUEST_CHANGES\nISSUES: " + ("x" * 5000) + "\nREASON: y\n"
+            _obs, _r, _d, info = env.step(huge)
+            self.assertIn("score_elapsed_ms", info)
+            self.assertGreaterEqual(int(info["score_elapsed_ms"]), 0)
+        finally:
+            os.environ.pop("CODEDRIFT_MAX_AGENT_RESPONSE_CHARS", None)
 
 
 if __name__ == "__main__":

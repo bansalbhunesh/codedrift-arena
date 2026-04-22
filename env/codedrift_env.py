@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import copy
 import logging
+import os
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -87,6 +89,9 @@ class CodeDriftEnv:
         self._episode_ready: bool = False
         self._cached_reset_obs: Optional[Observation] = None
         self._episode_id: str = ""
+        self._max_agent_response_chars: int = int(
+            os.environ.get("CODEDRIFT_MAX_AGENT_RESPONSE_CHARS", "12000")
+        )
 
     def _new_episode_id(self) -> str:
         return uuid.uuid4().hex[:12]
@@ -173,13 +178,24 @@ class CodeDriftEnv:
 
         if agent_response is None:
             agent_response = ""
+        elif len(agent_response) > self._max_agent_response_chars:
+            logger.warning(
+                "agent_response_truncated episode_id=%s original_len=%s max_len=%s",
+                self._episode_id,
+                len(agent_response),
+                self._max_agent_response_chars,
+            )
+            agent_response = agent_response[: self._max_agent_response_chars]
 
+        started = time.perf_counter()
         reward, info = self.scorer.score(
             agent_response=agent_response,
             actions=self._actions,
             pr_diff=self._pr_diff,
         )
+        elapsed_ms = int((time.perf_counter() - started) * 1000)
         info.setdefault("episode_id", self._episode_id)
+        info["score_elapsed_ms"] = elapsed_ms
         self._step += 1
         done = True
         logger.info(

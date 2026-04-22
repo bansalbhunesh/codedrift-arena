@@ -299,7 +299,11 @@ def parse_args():
     p = argparse.ArgumentParser(description="CodeDrift Arena GRPO Training")
     p.add_argument("--model", default=cfg.DEFAULT_MODEL_ID)
     p.add_argument("--difficulty", default="easy", choices=["easy", "medium", "hard"])
-    p.add_argument("--personality", default="random", choices=["random", "subtle", "aggressive", "escalating"])
+    p.add_argument(
+        "--personality",
+        default="random",
+        choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
+    )
     p.add_argument("--steps", type=int, default=200)
     p.add_argument("--episodes", type=int, default=500)
     p.add_argument("--seed", type=int, default=42)
@@ -310,7 +314,10 @@ def parse_args():
         default="",
         help="Optional path to write held-out eval rows as JSON.",
     )
-    return p.parse_args()
+    args = p.parse_args()
+    if not 0.0 <= args.heldout_fraction < 1.0:
+        p.error("--heldout_fraction must be in [0.0, 1.0).")
+    return args
 
 
 if __name__ == "__main__":
