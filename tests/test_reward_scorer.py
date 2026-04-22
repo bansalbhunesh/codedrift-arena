@@ -11,7 +11,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from agents.drift_agent import DriftAction
-from rewards.scorer import RewardScorer
+from rewards.scorer import RewardScorer, verbosity_penalty
 
 
 class TestRewardScorer(unittest.TestCase):
@@ -111,6 +111,24 @@ class TestRewardScorer(unittest.TestCase):
             "",
         )
         self.assertAlmostEqual(r, self.s.R_FALSE_REJECTION)
+
+    def test_verbosity_penalty_on_short_diff(self) -> None:
+        """Very long ISSUES vs tiny diff should incur a bounded penalty (anti catalog-dump)."""
+        a = DriftAction(
+            drift_type="rename",
+            stale_ref="getUserData",
+            current_ref="fetchUserData",
+            metadata={},
+        )
+        short_diff = "+a\n"
+        long_issues = " ".join(["getUserData"] * 80)
+        pen, meta = verbosity_penalty(long_issues.lower(), short_diff)
+        self.assertLess(pen, 0.0)
+        self.assertGreater(meta.get("verbosity_ratio", 0.0), 4.0)
+        text = f"VERDICT: REQUEST_CHANGES\nISSUES: {long_issues}\nREASON: x.\n"
+        r, info = self.s.score(text, [a], short_diff)
+        self.assertLess(r, self.s.R_CAUGHT_STALE)
+        self.assertIn("verbosity_penalty", info.get("breakdown", {}))
 
     def test_rename_caught_only_if_stale_name_mentioned(self) -> None:
         """Regression: citing only the new symbol must not count as catching drift."""

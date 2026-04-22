@@ -205,6 +205,32 @@ def _catalog_stale_identifiers() -> set[str]:
 CATALOG_STALE_IDENTIFIERS = _catalog_stale_identifiers()
 
 
+def verbosity_penalty(issues_norm: str, pr_diff: str) -> tuple[float, dict]:
+    """
+    Penalize ISSUES that are huge relative to the PR diff (catalog / keyword spam).
+
+    Uses normalized ISSUES text (same channel as mention credit). Only meaningful
+    when a non-empty diff exists so we compare apples to apples.
+    """
+    if not (issues_norm or "").strip():
+        return 0.0, {}
+    d = (pr_diff or "").strip()
+    if not d:
+        return 0.0, {}
+    issues_tokens = len(issues_norm.split())
+    diff_tokens = max(len(d.split()), 1)
+    ratio = issues_tokens / diff_tokens
+    meta = {"issues_word_count": issues_tokens, "diff_word_count": diff_tokens, "verbosity_ratio": round(ratio, 3)}
+    # Threshold above ~3.3 avoids penalizing concise multi-drift ISSUES on tiny diffs
+    # (two catches in one sentence vs a 2–3 token diff).
+    _VERBOSITY_RATIO_START = 4.0
+    if ratio <= _VERBOSITY_RATIO_START:
+        return 0.0, meta
+    pen = -min(0.3, (ratio - _VERBOSITY_RATIO_START) * 0.05)
+    meta["verbosity_penalty"] = pen
+    return pen, meta
+
+
 class RewardScorer:
     R_CAUGHT_STALE = 1.0
     R_CORRECT_APPROVE = 0.5
@@ -327,6 +353,14 @@ class RewardScorer:
         else:
             info["spurious_mentions"] = []
 
+        vpen, vmeta = verbosity_penalty(issues_norm, pr_diff)
+        if vpen:
+            total += vpen
+            info["verbosity"] = vmeta
+            info["breakdown"]["verbosity_penalty"] = vpen
+        elif vmeta:
+            info["verbosity"] = vmeta
+
         n = len(actions)
         nc = len(info["caught"])
         info["recall"] = nc / max(1, n)
@@ -347,9 +381,10 @@ class RewardScorer:
         info["diff_grounding_fraction"] = ng / max(1, n)
 
         mal = "yes" if info["malformed_issues"] else "no"
+        verb = f" | verbosity_pen={info['breakdown'].get('verbosity_penalty', 0):+.2f}" if vpen else ""
         info["metric_strip"] = (
             f"reward={total:+.2f} | recall={info['recall']:.0%} | verdict={verdict} | "
-            f"malformed_issues={mal} | grounded_in_diff={ng}/{n} | spurious={len(info['spurious_mentions'])}"
+            f"malformed_issues={mal} | grounded_in_diff={ng}/{n} | spurious={len(info['spurious_mentions'])}{verb}"
         )
         info["judge_emoji"] = verdict_emoji(info, total)
         info["judge_summary"] = judge_summary_line(info, total)

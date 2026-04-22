@@ -68,6 +68,9 @@ _SESSION_MIN_SUPPORTED_SCHEMA_VERSION = int(
 )
 _METRICS_ACCESS = os.environ.get("CODEDRIFT_METRICS_ACCESS", "public").strip().lower()
 _MAX_IN_MEMORY_SESSIONS = int(os.environ.get("CODEDRIFT_MAX_IN_MEMORY_SESSIONS", "2000"))
+_TRUSTED_PROXIES = frozenset(
+    x.strip() for x in os.environ.get("CODEDRIFT_TRUSTED_PROXIES", "").split(",") if x.strip()
+)
 _WINDOW_SECONDS = 60
 _hits_lock = Lock()
 _hits: dict[str, tuple[int, int]] = {}
@@ -143,12 +146,16 @@ _validate_settings()
 
 
 def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    if request.client is None:
-        return "unknown"
-    return request.client.host or "unknown"
+    """
+    Prefer the TCP client IP. Only honor ``X-Forwarded-For`` when the immediate
+    peer is listed in ``CODEDRIFT_TRUSTED_PROXIES`` (e.g. your edge load balancer).
+    """
+    conn_ip = request.client.host if request.client else ""
+    if _TRUSTED_PROXIES and conn_ip in _TRUSTED_PROXIES:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
+    return conn_ip or "unknown"
 
 
 def _audit(event: str, **fields: object) -> None:
@@ -177,6 +184,9 @@ def _allow_request(ip: str) -> tuple[bool, int]:
             log.exception("redis_rate_limit_failed_falling_back_to_memory")
 
     with _hits_lock:
+        stale = [k for k, (w, _) in _hits.items() if w < window - 1]
+        for k in stale:
+            del _hits[k]
         prev_window, count = _hits.get(ip, (window, 0))
         if prev_window != window:
             prev_window, count = window, 0
@@ -332,11 +342,16 @@ def _evict_in_memory_sessions_if_needed() -> None:
         log.warning("session_store_evicted count=%s max_in_memory=%s", excess, _MAX_IN_MEMORY_SESSIONS)
 
 
+def _session_json_safe(data: dict[str, object]) -> dict[str, object]:
+    """``CodeDriftEnv`` lives only under ``_env`` and must never go to Redis/JSON."""
+    return {k: v for k, v in data.items() if k != "_env"}
+
+
 def _store_session(session_id: str, data: dict[str, object]) -> None:
     if _redis_client is not None:
         try:
             key = _session_redis_key(session_id)
-            _redis_client.set(key, json.dumps(data), ex=_SESSION_TTL_SECONDS)
+            _redis_client.set(key, json.dumps(_session_json_safe(data)), ex=_SESSION_TTL_SECONDS)
             return
         except Exception:
             log.exception("redis_session_store_failed_falling_back_to_memory")
@@ -381,7 +396,11 @@ def _load_session(session_id: str) -> dict[str, object] | None:
 def _save_session_update(session_id: str, data: dict[str, object]) -> None:
     if _redis_client is not None:
         try:
-            _redis_client.set(_session_redis_key(session_id), json.dumps(data), ex=_SESSION_TTL_SECONDS)
+            _redis_client.set(
+                _session_redis_key(session_id),
+                json.dumps(_session_json_safe(data)),
+                ex=_SESSION_TTL_SECONDS,
+            )
             return
         except Exception:
             log.exception("redis_session_update_failed_falling_back_to_memory")
@@ -446,6 +465,8 @@ def api_reset(payload: ResetRequest, request: Request) -> dict[str, object]:
         "pr_diff": env.pr_diff,
         "actions": _serialize_actions(env.stale_actions),
     }
+    # Live env enables CodeDriftEnv.step (adaptive feedback); omitted from Redis payload.
+    session_data["_env"] = env
     _store_session(raw_session_id, session_data)
     request_id = getattr(request.state, "request_id", "")
     _audit(
@@ -500,10 +521,18 @@ def api_step(payload: StepRequest, request: Request) -> dict[str, object]:
     pr_diff = str(session.get("pr_diff", ""))
     if not isinstance(actions_payload, list):
         raise HTTPException(status_code=500, detail="corrupt session payload")
-    actions = _deserialize_actions(actions_payload)
-    reward, info = _scorer.score(payload.review, actions, pr_diff)
-    info.setdefault("episode_id", str(session.get("episode_id", "")))
-    done = True
+    env_live = session.get("_env")
+    if isinstance(env_live, CodeDriftEnv):
+        try:
+            _obs, reward, done, info = env_live.step(payload.review)
+        except RuntimeError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        info.setdefault("episode_id", str(session.get("episode_id", "")))
+    else:
+        actions = _deserialize_actions(actions_payload)
+        reward, info = _scorer.score(payload.review, actions, pr_diff)
+        info.setdefault("episode_id", str(session.get("episode_id", "")))
+        done = True
     session["used"] = True
     session["expires_at"] = time.time() + _SESSION_TTL_SECONDS
     _save_session_update(raw_session_id, session)

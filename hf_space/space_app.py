@@ -176,6 +176,19 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
         status = _status_lines(reward, info)
         info["adversary_brain"] = env.drift_agent.adaptive_snapshot()
         return env, gr.update(), gr.update(), gr.update(), "", status, _adversary_brain_html(env), _fmt_info(info)
+    except RuntimeError as e:
+        snap = env.debug_snapshot() if env is not None else {}
+        err = {"error": str(e), "type": "RuntimeError", "env": snap, "hint": "One score per episode — click **New episode**."}
+        return (
+            env,
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            "### ⚠️ This episode was already scored (or is not ready).\nClick **New episode** to continue.",
+            _adversary_brain_html(env),
+            _fmt_info(err),
+        )
     except Exception as e:
         snap = env.debug_snapshot() if env is not None else {}
         err = {"error": str(e), "type": type(e).__name__, "env": snap}
