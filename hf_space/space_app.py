@@ -21,6 +21,47 @@ def _fmt_info(info: dict[str, Any]) -> str:
     return json.dumps(info, indent=2, default=str)
 
 
+def _adversary_brain_html(env: CodeDriftEnv | None) -> str:
+    if env is None:
+        return "<div style='opacity:.7'>Start an episode to initialize adversary state.</div>"
+    snap = env.drift_agent.adaptive_snapshot()
+    if not snap.get("enabled"):
+        return (
+            "<div style='opacity:.8'>"
+            "Adversary Brain is available in <code>adaptive</code> personality mode."
+            "</div>"
+        )
+    stage = str(snap.get("stage", "random"))
+    ep = int(snap.get("episodes_run", 0) or 0)
+    wr5 = float(snap.get("recent_win_rate_5", 0.0) or 0.0)
+    wr10 = float(snap.get("recent_win_rate_10", 0.0) or 0.0)
+    wr20 = float(snap.get("recent_win_rate_20", 0.0) or 0.0)
+    scores = snap.get("mode_scores", {}) or {}
+
+    def bar(v: float) -> str:
+        n = max(0, min(10, int(round(v * 10))))
+        return "█" * n + "░" * (10 - n)
+
+    color = (
+        "#22c55e" if stage == "random" else "#f59e0b" if stage == "subtle" else "#ef4444"
+    )
+    rows = []
+    for mode in ("random", "subtle", "aggressive"):
+        v = float(scores.get(mode, 0.0) or 0.0)
+        rows.append(
+            f"<div><b>{mode:10s}</b> "
+            f"<span style='font-family:monospace'>{bar(v)}</span> {v:.0%}</div>"
+        )
+    return (
+        f"<div style='border-left:6px solid {color}; padding-left:12px'>"
+        f"<h3 style='margin:0;color:{color}'>🧠 Adversary Brain</h3>"
+        f"<div><b>Stage:</b> {stage.upper()} &nbsp; <b>Episode:</b> {ep}</div>"
+        f"<div><b>Reviewer win rate:</b> 5={wr5:.0%} | 10={wr10:.0%} | 20={wr20:.0%}</div>"
+        f"<div style='margin-top:8px'>{''.join(rows)}</div>"
+        "</div>"
+    )
+
+
 def _status_lines(reward: float, info: dict[str, Any]) -> str:
     """SUCCESS/FAILURE headline in Markdown + emoji strip + summary + impact + confidence."""
     kw = info.get("judge_keyword_line") or "⚪ NO REVIEW"
@@ -74,6 +115,7 @@ def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
             obs.codebase_context,
             "",
             status,
+            _adversary_brain_html(env),
             _fmt_info({"note": "Submit a review to see scorer output.", "episode_id": env.episode_id}),
         )
     except Exception as e:
@@ -85,6 +127,7 @@ def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
             "",
             "",
             f"### ❌ Failed to start episode: {e!s}",
+            _adversary_brain_html(None),
             _fmt_info(err),
         )
 
@@ -98,10 +141,20 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
             "",
             "",
             "### ⚠️ No active episode. Click **New episode** first.",
+            _adversary_brain_html(None),
             _fmt_info({"error": "no_env"}),
         )
     if not review.strip():
-        return env, gr.update(), gr.update(), gr.update(), gr.update(), "### ⚠️ Paste a non-empty review.", gr.update()
+        return (
+            env,
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            gr.update(),
+            "### ⚠️ Paste a non-empty review.",
+            gr.update(),
+            gr.update(),
+        )
     if not env.is_ready_for_step:
         return (
             env,
@@ -110,6 +163,7 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
             gr.update(),
             gr.update(),
             "### ⚠️ Episode already scored.\nClick **New episode** to try again.",
+            _adversary_brain_html(env),
             _fmt_info(
                 {
                     "error": "episode_already_scored",
@@ -120,7 +174,8 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
     try:
         _, reward, _done, info = env.step(review)
         status = _status_lines(reward, info)
-        return env, gr.update(), gr.update(), gr.update(), "", status, _fmt_info(info)
+        info["adversary_brain"] = env.drift_agent.adaptive_snapshot()
+        return env, gr.update(), gr.update(), gr.update(), "", status, _adversary_brain_html(env), _fmt_info(info)
     except Exception as e:
         snap = env.debug_snapshot() if env is not None else {}
         err = {"error": str(e), "type": type(e).__name__, "env": snap}
@@ -131,6 +186,7 @@ def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
             gr.update(),
             gr.update(),
             f"### ❌ Scoring failed: {e!s}",
+            _adversary_brain_html(env),
             _fmt_info(err),
         )
 
@@ -158,7 +214,7 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
                     label="Difficulty",
                 )
                 personality = gr.Dropdown(
-                    choices=["random", "subtle", "aggressive", "escalating"],
+                    choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
                     value="random",
                     label="Drift personality",
                 )
@@ -181,6 +237,7 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
             prompt = gr.Textbox(label="Full Model Prompt (Context)", lines=5, max_lines=10)
         
         with gr.Column():
+            brain_panel = gr.HTML(label="Adversary Brain")
             review = gr.Textbox(
                 label="Reviewer Response (ISSUES: must cite stale refs)",
                 lines=10,
@@ -199,19 +256,19 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
     btn_new.click(
         new_episode,
         inputs=[difficulty, personality, seed],
-        outputs=[env_state, prompt, pr_diff, codebase, review, status, scorer_out],
+        outputs=[env_state, prompt, pr_diff, codebase, review, status, brain_panel, scorer_out],
     )
 
     btn_submit.click(
         submit_review,
         inputs=[env_state, review],
-        outputs=[env_state, prompt, pr_diff, codebase, review, status, scorer_out],
+        outputs=[env_state, prompt, pr_diff, codebase, review, status, brain_panel, scorer_out],
     )
 
     demo.load(
         new_episode,
         inputs=[difficulty, personality, seed],
-        outputs=[env_state, prompt, pr_diff, codebase, review, status, scorer_out],
+        outputs=[env_state, prompt, pr_diff, codebase, review, status, brain_panel, scorer_out],
     )
 
 if __name__ == "__main__":

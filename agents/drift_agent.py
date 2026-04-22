@@ -275,3 +275,28 @@ class DriftAgent:
         if wr > 0.5:
             return "subtle"
         return "random"
+
+    def adaptive_snapshot(self) -> dict[str, Any]:
+        """
+        UI-friendly state for the "Adversary Brain" panel.
+
+        Returns empty dict for non-adaptive personalities.
+        """
+        if self.personality != "adaptive":
+            return {}
+        per_mode = {
+            "random": self.recent_win_rate(window=5),
+            "subtle": self.recent_win_rate(window=10),
+            "aggressive": self.recent_win_rate(window=20),
+        }
+        stage = self._adaptive_mode()
+        return {
+            "enabled": True,
+            "stage": stage,
+            "episodes_run": self.episode_count,
+            "history_len": len(self._reviewer_wins),
+            "recent_win_rate_5": self.recent_win_rate(window=5),
+            "recent_win_rate_10": self.recent_win_rate(window=10),
+            "recent_win_rate_20": self.recent_win_rate(window=20),
+            "mode_scores": per_mode,
+        }
