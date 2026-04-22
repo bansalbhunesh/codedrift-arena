@@ -132,6 +132,38 @@ Copy [`.env.example`](.env.example) to `.env` and set `CODEDRIFT_HF_*`, `WANDB_*
 
 ---
 
+## Production server config
+
+`server/app.py` now includes production guardrails for auth, abuse prevention, signed sessions, and metrics access control.
+
+Recommended baseline (private deployment):
+
+```bash
+export CODEDRIFT_REQUIRE_AUTH=1
+export CODEDRIFT_API_READ_TOKEN=change-me-read
+export CODEDRIFT_API_WRITE_TOKEN=change-me-write
+export CODEDRIFT_API_RATE_LIMIT_RPM=120
+export CODEDRIFT_API_MAX_BODY_BYTES=262144
+export CODEDRIFT_SESSION_TTL_SECONDS=900
+export CODEDRIFT_SESSION_SIGNING_KEY=change-me-strong-secret
+export CODEDRIFT_SESSION_PREVIOUS_SIGNING_KEYS=
+export CODEDRIFT_SESSION_MIN_SUPPORTED_SCHEMA_VERSION=1
+export CODEDRIFT_METRICS_ACCESS=read
+export CODEDRIFT_LOG_FORMAT=json
+```
+
+Optional for multi-instance deployments:
+
+- Set `CODEDRIFT_REDIS_URL` to enable shared rate limits and shared session storage across replicas.
+- Rotate session signing keys with `CODEDRIFT_SESSION_PREVIOUS_SIGNING_KEYS` (comma-separated old keys).
+
+Typed API endpoints:
+
+- `POST /api/v1/reset` → returns signed `session_id` + initial observation.
+- `POST /api/v1/step` → single-use session scoring (`409` on replay).
+
+---
+
 ## Environment API (important for demos & training)
 
 | Method | Purpose |
