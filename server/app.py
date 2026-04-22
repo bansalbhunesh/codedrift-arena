@@ -67,6 +67,7 @@ _SESSION_MIN_SUPPORTED_SCHEMA_VERSION = int(
     os.environ.get("CODEDRIFT_SESSION_MIN_SUPPORTED_SCHEMA_VERSION", "1")
 )
 _METRICS_ACCESS = os.environ.get("CODEDRIFT_METRICS_ACCESS", "public").strip().lower()
+_MAX_IN_MEMORY_SESSIONS = int(os.environ.get("CODEDRIFT_MAX_IN_MEMORY_SESSIONS", "2000"))
 _WINDOW_SECONDS = 60
 _hits_lock = Lock()
 _hits: dict[str, tuple[int, int]] = {}
@@ -130,6 +131,8 @@ def _validate_settings() -> None:
         raise SystemExit("SESSION_MIN_SUPPORTED_SCHEMA_VERSION cannot exceed SESSION_SCHEMA_VERSION")
     if _METRICS_ACCESS not in {"public", "read", "write"}:
         raise SystemExit("CODEDRIFT_METRICS_ACCESS must be one of: public, read, write")
+    if _MAX_IN_MEMORY_SESSIONS < 1:
+        raise SystemExit("CODEDRIFT_MAX_IN_MEMORY_SESSIONS must be >= 1")
     if _REQUIRE_AUTH and not (_AUTH_TOKEN or _READ_TOKEN or _WRITE_TOKEN):
         raise SystemExit(
             "CODEDRIFT_REQUIRE_AUTH=1 requires CODEDRIFT_API_TOKEN or scoped read/write tokens"
@@ -183,10 +186,8 @@ def _allow_request(ip: str) -> tuple[bool, int]:
 
 
 def _is_write_route(request: Request) -> bool:
-    if request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}:
-        return True
-    path = request.url.path
-    return path.startswith("/api/v1/step") or path.startswith("/api/v1/reset")
+    """Any mutating HTTP verb is treated as write scope (REST-style)."""
+    return request.method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
 
 
 def _authorize_request(request: Request, request_id: str) -> JSONResponse | None:
@@ -286,15 +287,25 @@ def _serialize_actions(actions: list[DriftAction]) -> list[dict[str, object]]:
 
 
 def _deserialize_actions(payload: list[dict[str, object]]) -> list[DriftAction]:
-    return [
-        DriftAction(
-            drift_type=str(d["drift_type"]),
-            stale_ref=str(d["stale_ref"]),
-            current_ref=str(d["current_ref"]),
-            metadata=dict(d.get("metadata") or {}),
-        )
-        for d in payload
-    ]
+    out: list[DriftAction] = []
+    for i, d in enumerate(payload):
+        if not isinstance(d, dict):
+            raise HTTPException(status_code=500, detail=f"corrupt session action[{i}]: not an object")
+        try:
+            out.append(
+                DriftAction(
+                    drift_type=str(d["drift_type"]),
+                    stale_ref=str(d["stale_ref"]),
+                    current_ref=str(d["current_ref"]),
+                    metadata=dict(d.get("metadata") or {}),
+                )
+            )
+        except KeyError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail=f"corrupt session action[{i}]: missing field {exc.args[0]!r}",
+            ) from exc
+    return out
 
 
 def _purge_expired_sessions(now: float) -> None:
@@ -308,6 +319,19 @@ def _session_redis_key(session_id: str) -> str:
     return f"codedrift:session:{session_id}"
 
 
+def _evict_in_memory_sessions_if_needed() -> None:
+    """Prevent unbounded RAM growth when Redis is disabled (abuse / many resets)."""
+    with _sessions_lock:
+        # After the upcoming insert, we want len <= _MAX_IN_MEMORY_SESSIONS.
+        excess = len(_sessions) - _MAX_IN_MEMORY_SESSIONS + 1
+        if excess <= 0:
+            return
+        items = sorted(_sessions.items(), key=lambda kv: float(kv[1].get("created_at", 0.0)))
+        for k, _ in items[:excess]:
+            _sessions.pop(k, None)
+        log.warning("session_store_evicted count=%s max_in_memory=%s", excess, _MAX_IN_MEMORY_SESSIONS)
+
+
 def _store_session(session_id: str, data: dict[str, object]) -> None:
     if _redis_client is not None:
         try:
@@ -316,6 +340,7 @@ def _store_session(session_id: str, data: dict[str, object]) -> None:
             return
         except Exception:
             log.exception("redis_session_store_failed_falling_back_to_memory")
+    _evict_in_memory_sessions_if_needed()
     with _sessions_lock:
         _sessions[session_id] = data
 

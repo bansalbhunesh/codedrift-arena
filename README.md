@@ -155,6 +155,7 @@ export CODEDRIFT_LOG_FORMAT=json
 Optional for multi-instance deployments:
 
 - Set `CODEDRIFT_REDIS_URL` to enable shared rate limits and shared session storage across replicas.
+- Without Redis, set `CODEDRIFT_MAX_IN_MEMORY_SESSIONS` to bound RAM from unbounded `/api/v1/reset` abuse (oldest sessions are evicted first).
 - Rotate session signing keys with `CODEDRIFT_SESSION_PREVIOUS_SIGNING_KEYS` (comma-separated old keys).
 
 Typed API endpoints:

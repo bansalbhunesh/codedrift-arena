@@ -244,6 +244,48 @@ class TestServerSecurity(unittest.TestCase):
             os.environ.pop("CODEDRIFT_API_TOKEN", None)
             os.environ.pop("CODEDRIFT_SESSION_MIN_SUPPORTED_SCHEMA_VERSION", None)
 
+    def test_api_reset_invalid_difficulty_returns_422(self) -> None:
+        os.environ["CODEDRIFT_API_TOKEN"] = ""
+        try:
+            app = self._load_app()
+            client = TestClient(app)
+            r = client.post("/api/v1/reset", json={"difficulty": "nope", "personality": "random"})
+            self.assertEqual(r.status_code, 422)
+        finally:
+            os.environ.pop("CODEDRIFT_API_TOKEN", None)
+
+    def test_api_step_validation_error_returns_422(self) -> None:
+        os.environ["CODEDRIFT_API_TOKEN"] = ""
+        try:
+            app = self._load_app()
+            client = TestClient(app)
+            r = client.post("/api/v1/step", json={"session_id": "x", "review": "ok"})
+            self.assertEqual(r.status_code, 422)
+        finally:
+            os.environ.pop("CODEDRIFT_API_TOKEN", None)
+
+    def test_in_memory_session_cap_evicts_oldest(self) -> None:
+        os.environ["CODEDRIFT_API_TOKEN"] = ""
+        os.environ["CODEDRIFT_MAX_IN_MEMORY_SESSIONS"] = "2"
+        try:
+            app = self._load_app()
+            client = TestClient(app)
+            r1 = client.post("/api/v1/reset", json={"difficulty": "easy", "personality": "random", "seed": 1})
+            r2 = client.post("/api/v1/reset", json={"difficulty": "easy", "personality": "random", "seed": 2})
+            r3 = client.post("/api/v1/reset", json={"difficulty": "easy", "personality": "random", "seed": 3})
+            self.assertEqual(r1.status_code, 200)
+            self.assertEqual(r2.status_code, 200)
+            self.assertEqual(r3.status_code, 200)
+            sid1 = r1.json()["session_id"]
+            s = client.post(
+                "/api/v1/step",
+                json={"session_id": sid1, "review": "VERDICT: APPROVE\nISSUES: none\nREASON: x"},
+            )
+            self.assertEqual(s.status_code, 404)
+        finally:
+            os.environ.pop("CODEDRIFT_API_TOKEN", None)
+            os.environ.pop("CODEDRIFT_MAX_IN_MEMORY_SESSIONS", None)
+
     def test_metrics_access_read_mode_requires_token(self) -> None:
         os.environ["CODEDRIFT_METRICS_ACCESS"] = "read"
         os.environ["CODEDRIFT_API_READ_TOKEN"] = "readtok"
