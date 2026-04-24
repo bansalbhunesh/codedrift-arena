@@ -1,9 +1,9 @@
 # GPU training stack (Colab, local CUDA). Install:
 #   pip install -r requirements-train.txt
 #
-# NOTE: Unsloth removed intentionally. It monkey-patches TRL internals
-# (sampling_params.split) and crashes on any TRL version change.
-# We use the stable HF stack: transformers + bitsandbytes + peft + trl.
+# NOTE:
+# - HF path is the default backend (stable fallback): --backend hf
+# - Unsloth path is optional (for faster/leaner runs): --backend unsloth
 datasets>=2.14.0
 matplotlib>=3.7.0
 numpy>=1.24.0
@@ -12,3 +12,4 @@ transformers>=4.40.0
 bitsandbytes>=0.43.0
 peft>=0.10.0
 accelerate>=0.29.0
+unsloth

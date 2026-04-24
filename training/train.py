@@ -2,11 +2,8 @@
 CodeDrift Arena — GRPO Training Script
 Model:   Qwen2.5-1.5B-Instruct  (fits T4 free Colab, ~8GB VRAM)
 Trainer: HuggingFace TRL GRPOTrainer
-Quant:   bitsandbytes 4-bit QLoRA (no Unsloth dependency)
-
-Root cause of previous crashes: Unsloth monkey-patches TRL internals via
-sampling_params.split("\n")[-2], which breaks when TRL version changes.
-This version uses the stable HF stack only.
+Quant:   bitsandbytes 4-bit QLoRA
+Backend: HF stack by default, optional Unsloth path via --backend unsloth
 """
 
 import argparse
@@ -177,11 +174,43 @@ def make_reward_fn(difficulty: str):
     return reward_fn
 
 
-def load_model_and_tokenizer(model_name: str):
+def load_model_and_tokenizer(model_name: str, backend: str = "hf", seed: int = 42):
     """
-    Load model with 4-bit QLoRA using standard HF stack (no Unsloth).
-    Works reliably on any TRL version without monkey-patch crashes.
+    Load model with 4-bit QLoRA.
+    - backend="hf": stable transformers + bitsandbytes + peft path
+    - backend="unsloth": FastLanguageModel path when available
     """
+    if backend == "unsloth":
+        try:
+            from unsloth import FastLanguageModel  # type: ignore
+        except Exception as exc:
+            raise RuntimeError(
+                "Unsloth backend requested but package is unavailable. "
+                "Install requirements-train.txt (includes unsloth) or use --backend hf."
+            ) from exc
+
+        print("Loading model/tokenizer via Unsloth...")
+        model, tokenizer = FastLanguageModel.from_pretrained(
+            model_name=model_name,
+            max_seq_length=1280,
+            load_in_4bit=True,
+        )
+        model = FastLanguageModel.get_peft_model(
+            model,
+            r=16,
+            lora_alpha=16,
+            target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
+            lora_dropout=0.05,
+            bias="none",
+            use_gradient_checkpointing="unsloth",
+            random_state=seed,
+        )
+        model.print_trainable_parameters()
+        if tokenizer.pad_token is None:
+            tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
+        return model, tokenizer
+
     from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
     from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
     import torch
@@ -231,13 +260,13 @@ def train(args):
     print(f"  Personality: {args.personality}")
     print(f"  Steps:       {args.steps}")
     print(f"  Episodes:    {args.episodes}")
-    print(f"  Backend:     HuggingFace TRL + bitsandbytes (no Unsloth)\n")
+    print(f"  Backend:     {args.backend}\n")
 
     from trl import GRPOConfig, GRPOTrainer
     from datasets import Dataset
     import inspect
 
-    model, tokenizer = load_model_and_tokenizer(args.model)
+    model, tokenizer = load_model_and_tokenizer(args.model, backend=args.backend, seed=args.seed)
 
     print("Building dataset...")
     rows = build_dataset_rows(
@@ -306,6 +335,7 @@ def parse_args():
     )
     p.add_argument("--steps", type=int, default=200)
     p.add_argument("--episodes", type=int, default=500)
+    p.add_argument("--backend", choices=["hf", "unsloth"], default="hf")
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--output_dir", default=cfg.OUTPUT_DIR)
     p.add_argument("--heldout_fraction", type=float, default=0.2)

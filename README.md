@@ -8,7 +8,7 @@
 |--|--|
 | **Repo** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
 | **🚀 Live Demo** | [![HF Space](https://img.shields.io/badge/🤗%20HuggingFace-Space-blue)](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) |
-| **Stack** | Python · Gradio (CPU demo) · TRL GRPO + bitsandbytes QLoRA (GPU train) · OpenEnv HTTP bridge |
+| **Stack** | Python · Gradio (CPU demo) · TRL GRPO + bitsandbytes QLoRA + optional Unsloth (GPU train) · OpenEnv HTTP bridge |
 
 ---
 
@@ -57,8 +57,9 @@ To win, you need real training data. We use **GRPO** (Group Relative Policy Opti
 3. **Run Training**:
    ```python
    # Run the train.py script directly or copy contents of training/train.py
-   !python training/train.py --episodes 100 --steps 50
+   !python training/train.py --episodes 100 --steps 50 --backend unsloth
    ```
+   Use `--backend hf` for the stable Hugging Face fallback.
 4. **Export Evidence**: The script saves a `final` LoRA adapter and logs to W&B. Replace the illustrative charts in `demo/sample_training_curve.md` with your real ones.
 
 ---
