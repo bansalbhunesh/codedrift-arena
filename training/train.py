@@ -231,7 +231,7 @@ def load_model_and_tokenizer(model_name: str, backend: str = "hf", seed: int = 4
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
-        dtype=torch.float16,
+        torch_dtype=torch.float16,
         device_map="auto",
         trust_remote_code=True,
     )
