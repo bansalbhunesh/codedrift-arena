@@ -231,7 +231,7 @@ def load_model_and_tokenizer(model_name: str, backend: str = "hf", seed: int = 4
     model = AutoModelForCausalLM.from_pretrained(
         model_name,
         quantization_config=bnb_config,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,
         device_map="auto",
         trust_remote_code=True,
     )
@@ -301,7 +301,9 @@ def train(args):
         max_prompt_length=1024,
         max_completion_length=256,
         temperature=0.8,
-        fp16=True,  # T4 supports fp16, not bf16
+        # fp16 disabled: GRPOTrainer generates rollouts outside AMP's GradScaler
+        # context, causing "No inf checks recorded" assertion in PyTorch 2.x.
+        # bitsandbytes already computes in float16 via bnb_4bit_compute_dtype.
     )
 
     # Safely instantiate GRPOTrainer across TRL versions
