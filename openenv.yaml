@@ -1,0 +1,17 @@
+name: codedrift-arena
+version: 0.1.0
+description: Single-step PR review RL environment under adversarial codebase drift.
+entrypoint:
+  module: server.app
+  app: app
+python:
+  version: "3.11"
+requirements:
+  - requirements-server.txt
+metadata:
+  repository: https://github.com/bansalbhunesh/codedrift-arena
+  tags:
+    - openenv
+    - rl
+    - code-review
+    - world-modeling

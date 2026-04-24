@@ -12,6 +12,16 @@
 
 ---
 
+## Submission Materials
+
+- **OpenEnv manifest**: `openenv.yaml`
+- **Colab notebook**: `colab/CodeDrift_GRPO.ipynb`
+- **Training plots**: `demo/training_reward_curve.png` (replace placeholder with real run)
+- **Trained adapter (HF model card/link)**: `TODO`
+- **Mini-blog or <2 min demo video**: `TODO`
+
+---
+
 ## Why judges care (30 seconds)
 
 1. **Clear story** — Oversight agent (reviewer) vs adversary (drift) in a shared codebase; drift is structured and inspectable.
@@ -49,7 +59,7 @@ After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`rewa
 
 To win, you need real training data. We use **GRPO** (Group Relative Policy Optimization) which optimizes for the deterministic reward without human labels.
 
-1. **Open Colab**: Create a new notebook with a T4 GPU.
+1. **Open Colab**: Use `colab/CodeDrift_GRPO.ipynb` with a T4 GPU runtime.
 2. **Install Deps**:
    ```bash
    pip install -r https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/requirements-train.txt
@@ -60,7 +70,7 @@ To win, you need real training data. We use **GRPO** (Group Relative Policy Opti
    !python training/train.py --episodes 100 --steps 50 --backend unsloth
    ```
    Use `--backend hf` for the stable Hugging Face fallback.
-4. **Export Evidence**: The script saves a `final` LoRA adapter and logs to W&B. Replace the illustrative charts in `demo/sample_training_curve.md` with your real ones.
+4. **Export Evidence**: The script saves a `final` LoRA adapter and logs to W&B. Commit reward plots (PNG) and link the trained adapter in the Submission Materials section.
 
 ---
 
@@ -222,7 +232,11 @@ Set `CODEDRIFT_LOG_LEVEL=DEBUG` for verbose logs (`codedrift/logutil.py`). Episo
 ## Contributing / hackathon fork checklist
 
 - [x] Deploy Space → **Live at https://huggingface.co/spaces/Bhuneshlooper/CodeDrift**
+- [x] Add OpenEnv manifest (`openenv.yaml`)
+- [x] Add Colab training notebook (`colab/CodeDrift_GRPO.ipynb`)
 - [ ] Run `python scripts/smoke_env.py` and unit tests before recording.
+- [ ] Run 200+ step training and commit reward plots (`demo/*.png`)
+- [ ] Link trained adapter + mini-blog/video in **Submission Materials**
 - [ ] Rehearse: one **New episode** → click **▶ Load Trained Model** → **Score review** → **New episode** again.
 
 Questions or tight demo slots: open an issue on the repo with your Space link and intended model backend (optional).
