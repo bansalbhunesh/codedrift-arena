@@ -254,6 +254,22 @@ def load_model_and_tokenizer(model_name: str, backend: str = "hf", seed: int = 4
         lm_head = getattr(model.base_model.model, "lm_head", None)
         if lm_head is not None and hasattr(lm_head, "weight"):
             model.base_model.model.lm_head = lm_head.to(dtype=torch.float16)
+            # Last-resort guard for mixed-precision autocast paths in some Colab stacks.
+            # If hidden states become bf16 but lm_head stays fp16/fp32, cast inputs to
+            # lm_head weight dtype right before linear projection.
+            if not hasattr(model.base_model.model.lm_head, "_codedrift_safe_forward"):
+                def _safe_lm_head_forward(x):
+                    weight_dtype = model.base_model.model.lm_head.weight.dtype
+                    if x.dtype != weight_dtype:
+                        x = x.to(dtype=weight_dtype)
+                    return torch.nn.functional.linear(
+                        x,
+                        model.base_model.model.lm_head.weight,
+                        model.base_model.model.lm_head.bias,
+                    )
+
+                model.base_model.model.lm_head.forward = _safe_lm_head_forward
+                model.base_model.model.lm_head._codedrift_safe_forward = True
 
     model.print_trainable_parameters()
 
@@ -310,6 +326,7 @@ def train(args):
         max_prompt_length=1024,
         max_completion_length=256,
         temperature=0.8,
+        bf16=False,
         # fp16 disabled: GRPOTrainer generates rollouts outside AMP's GradScaler
         # context, causing "No inf checks recorded" assertion in PyTorch 2.x.
         # bitsandbytes already computes in float16 via bnb_4bit_compute_dtype.
