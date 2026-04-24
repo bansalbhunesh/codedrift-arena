@@ -246,6 +246,15 @@ def load_model_and_tokenizer(model_name: str, backend: str = "hf", seed: int = 4
         task_type="CAUSAL_LM",
     )
     model = get_peft_model(model, lora_config)
+    # Defensive dtype alignment: in some Colab/Transformers stacks, lm_head may stay fp32
+    # while hidden states are bf16/fp16 during generate(), causing linear dtype mismatch.
+    if hasattr(model, "lm_head") and hasattr(model.lm_head, "weight"):
+        model.lm_head = model.lm_head.to(dtype=torch.float16)
+    elif hasattr(model, "base_model") and hasattr(model.base_model, "model"):
+        lm_head = getattr(model.base_model.model, "lm_head", None)
+        if lm_head is not None and hasattr(lm_head, "weight"):
+            model.base_model.model.lm_head = lm_head.to(dtype=torch.float16)
+
     model.print_trainable_parameters()
 
     return model, tokenizer
