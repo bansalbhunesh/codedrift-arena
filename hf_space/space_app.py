@@ -13,6 +13,11 @@ import gradio as gr
 
 from codedrift.logutil import configure_logging
 from env.codedrift_env import CodeDriftEnv
+from hf_space.real_pr_scorer import (
+    detect_languages,
+    extract_candidate_stale_refs,
+    score_real_pr,
+)
 
 configure_logging()
 
@@ -485,6 +490,98 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
             btn_submit = gr.Button("⚖️ Score review", variant="primary")
             scorer_out = gr.Textbox(label="Causal Reward Breakdown (JSON)", lines=12, max_lines=20, interactive=False)
             replay_out = gr.Markdown("No replay events yet. Score some reviews to populate this panel.")
+
+    with gr.Accordion("🌍 Score a Real PR (multi-language, auto-detect)", open=False):
+        gr.Markdown(
+            "<div class='cd-card cd-kpi'>"
+            "Paste a unified <code>git diff</code> from any language. The detector lists "
+            "candidate stale references it found (symbols removed but not re-added). "
+            "Edit/confirm them, paste your reviewer response, and click <b>Score Real PR</b>. "
+            "<br><b>Honest note:</b> this does not run the PR's real test suite — the "
+            "reward is based on whether your review's <code>ISSUES</code> block cites the "
+            "stale refs you (or the detector) confirmed."
+            "</div>"
+        )
+        real_diff = gr.Textbox(
+            label="📥 Paste unified diff (any language)",
+            lines=12,
+            placeholder="diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ ...",
+            elem_id="real_pr_diff_box",
+        )
+        with gr.Row():
+            btn_detect = gr.Button("🔎 Detect languages + candidate stale refs", variant="secondary")
+            real_kind = gr.Dropdown(
+                choices=["rename", "removal", "contract"],
+                value="rename",
+                label="Drift kind (how to score)",
+            )
+        detect_summary = gr.Markdown("Click *Detect* after pasting a diff.")
+        real_stale = gr.Textbox(
+            label="✏️ Stale refs to score against (one per line — edit before scoring)",
+            lines=4,
+            placeholder="getUserData\nutils/legacy.py\ncreateOrder(item, qty)",
+        )
+        real_review = gr.Textbox(
+            label="🧠 Reviewer response (VERDICT / ROOT_CAUSE / ISSUES / REASON)",
+            lines=8,
+            placeholder=(
+                "VERDICT: REQUEST_CHANGES\n"
+                "ROOT_CAUSE: <stale ref>\n"
+                "ISSUES: <cite each stale ref here>\n"
+                "REASON: ..."
+            ),
+        )
+        btn_score_real = gr.Button("⚖️ Score Real PR", variant="primary")
+        real_status = gr.Markdown("")
+        real_json = gr.Textbox(label="Real-PR scoring breakdown (JSON)", lines=12, interactive=False)
+
+        def _on_detect(diff_text: str) -> tuple[str, str]:
+            if not (diff_text or "").strip():
+                return ("Paste a diff first.", "")
+            summary = detect_languages(diff_text)
+            candidates = extract_candidate_stale_refs(diff_text, summary.languages)
+            md = (
+                f"**Files:** {len(summary.files)}  "
+                f"**+** {summary.additions}  **-** {summary.deletions}\n\n"
+                f"**Detected languages:** {', '.join(summary.languages) or '(unknown)'}\n\n"
+                f"**Candidate stale refs ({len(candidates)}):** "
+                f"`{'`, `'.join(candidates) if candidates else 'none — try editing manually'}`"
+            )
+            return md, "\n".join(candidates)
+
+        def _on_score_real(diff_text: str, refs_text: str, review_text: str, drift_kind: str) -> tuple[str, str]:
+            refs = [ln.strip() for ln in (refs_text or "").splitlines() if ln.strip()]
+            if not (diff_text or "").strip():
+                return ("### ⚠️ Paste a diff first.", _fmt_info({"error": "empty_diff"}))
+            if not refs:
+                return (
+                    "### ⚠️ Provide at least one stale ref (one per line).",
+                    _fmt_info({"error": "no_stale_refs"}),
+                )
+            if not (review_text or "").strip():
+                return (
+                    "### ⚠️ Paste a reviewer response.",
+                    _fmt_info({"error": "empty_review"}),
+                )
+            try:
+                reward, info, summary = score_real_pr(diff_text, review_text, refs, drift_kind=drift_kind)
+                status = _status_lines(reward, info)
+                payload = {"reward": reward, "diff_summary": summary, "scorer_info": info}
+                return status, _fmt_info(payload)
+            except Exception as exc:
+                return (
+                    f"### ❌ Real-PR scoring failed: {exc!s}",
+                    _fmt_info({"error": str(exc), "type": type(exc).__name__}),
+                )
+
+        btn_detect.click(
+            _on_detect, inputs=[real_diff], outputs=[detect_summary, real_stale]
+        )
+        btn_score_real.click(
+            _on_score_real,
+            inputs=[real_diff, real_stale, real_review, real_kind],
+            outputs=[real_status, real_json],
+        )
 
     _new_ep_outputs = [env_state, prompt, pr_diff, codebase, test_output_box, review, status, brain_panel, scorer_out, replay_state, replay_out]
     _step_outputs   = [env_state, prompt, pr_diff, codebase, test_output_box, review, status, brain_panel, scorer_out, replay_state, replay_out]
