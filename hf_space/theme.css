@@ -541,6 +541,20 @@
 
 /* ——— Mission tab instruction card polish ——— */
 .ds-section-gap .ds-lead--tight strong { color: var(--ds-text-primary); }
+.ds-steps {
+  margin: 0;
+  padding-left: var(--s-5);
+  list-style: decimal;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+}
+.ds-steps li {
+  font-size: var(--text-sm);
+  color: var(--ds-text-secondary);
+  line-height: 1.5;
+}
+.ds-steps li strong { color: var(--ds-text-primary); }
 
 /* ——— Cascade depth colours match game tone ——— */
 .cascade-ok    { border-left: 3px solid var(--ds-success); }

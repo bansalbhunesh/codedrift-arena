@@ -103,16 +103,16 @@ def _hud_html(player: dict[str, Any]) -> str:
 <section class="ds-hud" aria-label="Run overview">
   <div class="ds-hud__kpis">
     <div>
-      <p class="ds-caption">Callsign</p>
+      <p class="ds-caption">Agent</p>
       <p class="ds-h3--kpi">{player.get("callsign", "AGENT-001")}</p>
     </div>
     <div>
-      <p class="ds-caption">Level & XP</p>
-      <p class="ds-h3--kpi">L{lvl} · {int(player.get("total_xp", 0))} XP</p>
+      <p class="ds-caption">Level</p>
+      <p class="ds-h3--kpi">L{lvl} &nbsp;<span class="ds-kpi-suffix">{int(player.get("total_xp", 0))} XP</span></p>
     </div>
     <div>
-      <p class="ds-caption">Missions won</p>
-      <p class="ds-h3--kpi">{won}<span class="ds-kpi-suffix">/ {played}</span></p>
+      <p class="ds-caption">Wins</p>
+      <p class="ds-h3--kpi">{won}<span class="ds-kpi-suffix"> / {played}</span></p>
     </div>
     <div>
       <p class="ds-caption">Streak</p>
@@ -124,7 +124,7 @@ def _hud_html(player: dict[str, Any]) -> str:
     </div>
   </div>
   <div class="ds-hud__xp">
-    <p class="ds-caption">Next level — {into} / {step} XP in band</p>
+    <p class="ds-caption">Level {lvl + 1} — {into} / {step} XP</p>
     <div class="ds-xpbar" style="--xp-pct: {xp_pct:.2f}" role="progressbar" aria-valuenow="{into}" aria-valuemin="0" aria-valuemax="{step}">
       <div class="ds-xpbar-fill"></div>
     </div>
@@ -261,7 +261,7 @@ def _brain_html(env: CodeDriftEnv | None) -> str:
         f"<section class='ds-card ds-card--{tone}' aria-label='Adversary brain'>"
         f"<h3 class='ds-card__title'>Brain · {stage.upper()} · ep {ep}</h3>"
         f"<div class='ds-card__body'>"
-        f"<p class='brain-meta'>Reviewer win rate · 5={wr5:.0%} · 10={wr10:.0%} · 20={wr20:.0%}</p>"
+        f"<p class='brain-meta'>Win rate — 5ep: {wr5:.0%} · 10ep: {wr10:.0%} · 20ep: {wr20:.0%}</p>"
         f"<div>{''.join(rows)}</div>"
         f"</div></section>"
     )
@@ -524,16 +524,18 @@ def _scenario_overrides(scenario_mode: str, difficulty: str, personality: str) -
 
 def _replay_md(events: list[dict[str, Any]]) -> str:
     if not events:
-        return "_No mission log yet. Submit a mission report to populate this panel._"
-    lines = ["### MISSION LOG"]
+        return "_No mission log yet. Submit a review to populate this panel._"
+    lines = ["### Mission Log"]
     for i, ev in enumerate(events[-8:], start=1):
         verdict = str(ev.get("verdict", "UNKNOWN"))
         reward = float(ev.get("reward", 0.0))
         misses = int(ev.get("missing_stale_refs_count", 0))
         malformed = int(ev.get("malformed_issues", 0))
         epi = str(ev.get("episode_id", "n/a"))
+        miss_str = f"  missed {misses}" if misses else ""
+        mal_str = f"  malformed {malformed}" if malformed else ""
         lines.append(
-            f"{i}. `{epi}` · verdict={verdict} · reward={reward:+.2f} · missing={misses} · malformed={malformed}"
+            f"{i}. `{epi}` — **{verdict}** · {reward:+.2f} XP{miss_str}{mal_str}"
         )
     return "\n".join(lines)
 
@@ -1061,7 +1063,7 @@ with gr.Blocks(title="Bug Code Arena") as demo:
         hud_html = gr.HTML(_hud_html(DEFAULT_PLAYER))
         
         with gr.Row(elem_classes=["ds-toolbar"]):
-            btn_reset_player = gr.Button("Reset run stats (XP, streak, production)", variant="secondary")
+            btn_reset_player = gr.Button("Reset Stats", variant="secondary")
         btn_reset_player.click(reset_player, inputs=[player_state], outputs=[player_state, hud_html])
         
         # ── Tabs ───────────────────────────────────────────────────────────────
@@ -1071,11 +1073,13 @@ with gr.Blocks(title="Bug Code Arena") as demo:
             with gr.Tab("Mission"):
                 gr.HTML(
                     "<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
-                    "<p class='ds-lead ds-lead--tight'>"
-                    "<strong>1.</strong> Set rules · <strong>2.</strong> Deploy · <strong>3.</strong> Load Junior or Senior · "
-                    "<strong>4.</strong> Submit. Scored runs update <strong>XP</strong>, <strong>streak</strong>, and "
-                    "<strong>production health</strong> in the bar above."
-                    "</p></div></section>"
+                    "<ol class='ds-steps'>"
+                    "<li><strong>Set rules</strong> — pick difficulty, adversary style, and scenario.</li>"
+                    "<li><strong>Deploy</strong> — spawn a bug into the codebase.</li>"
+                    "<li><strong>Load a reviewer</strong> — Junior (untrained) or Senior (GRPO-trained).</li>"
+                    "<li><strong>Submit</strong> — score the review. XP, streak, and production health update above.</li>"
+                    "</ol>"
+                    "</div></section>"
                 )
 
                 with gr.Row(elem_classes=["ds-row"]):
@@ -1097,8 +1101,8 @@ with gr.Blocks(title="Bug Code Arena") as demo:
                         )
                         seed = gr.Textbox(value="42", label="Seed", max_lines=1)
                         btn_new = gr.Button("Deploy mission", variant="primary")
-                        benchmark_n = gr.Slider(minimum=3, maximum=30, value=10, step=1, label="Quick benchmark size")
-                        btn_benchmark = gr.Button("Run quick benchmark")
+                        benchmark_n = gr.Slider(minimum=3, maximum=30, value=10, step=1, label="Benchmark size")
+                        btn_benchmark = gr.Button("Quick Benchmark")
         
                     with gr.Column(scale=2, elem_classes=["ds-group"]):
                         gr.HTML("<h2 class='ds-block-title'>Outcome</h2>")
@@ -1153,24 +1157,24 @@ with gr.Blocks(title="Bug Code Arena") as demo:
                             "<div class='ds-loadout' role='listitem'>"
                             "<div class='loadout-title'>Baseline</div>"
                             "<div class='loadout-name'>Junior (untrained)</div>"
-                            "<div class='loadout-stats'>APPROVE · recalls no stale refs</div>"
+                            "<div class='loadout-stats'>Approves all PRs · catches nothing</div>"
                             "</div>"
                             "<div class='ds-loadout' role='listitem'>"
                             "<div class='loadout-title'>Trained</div>"
                             "<div class='loadout-name'>Senior (GRPO)</div>"
-                            "<div class='loadout-stats'>REQUEST_CHANGES · cites stale refs</div>"
+                            "<div class='loadout-stats'>Blocks the merge · traces root cause</div>"
                             "</div>"
                             "</div>"
                         )
                         with gr.Row():
                             btn_base    = gr.Button("Load Junior", variant="secondary")
                             btn_trained = gr.Button("Load Senior", variant="secondary")
-                        btn_submit = gr.Button("Submit mission report", variant="primary")
+                        btn_submit = gr.Button("Submit Review", variant="primary")
         
                         cascade_panel = gr.HTML(_cascade_html(None))
-                        scorer_out = gr.Textbox(label="XP breakdown (JSON)", lines=10, max_lines=18, interactive=False)
+                        scorer_out = gr.Textbox(label="Score breakdown (JSON)", lines=10, max_lines=18, interactive=False)
                         replay_out = gr.Markdown(
-                            "_No mission log yet. Submit a mission report to populate this panel._",
+                            "_No mission log yet. Submit a review to populate this panel._",
                             elem_classes="replay-markdown",
                         )
         
@@ -1179,10 +1183,10 @@ with gr.Blocks(title="Bug Code Arena") as demo:
                 gr.HTML(
                     "<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
                     "<p class='ds-lead ds-lead--tight'>"
-                    "<strong>Same bug. Same PR. Two models. One winner.</strong> "
-                    "Junior (untrained baseline) approves every PR and misses every stale ref. "
-                    "Senior (GRPO-trained) identifies the root cause, traces the failure path, and blocks the merge. "
-                    "Each battle is the clearest possible proof that training works."
+                    "<strong>Same bug. Same PR. Two models.</strong> "
+                    "Junior approves everything and ships the bug to production. "
+                    "Senior traces the root cause, names the stale ref, and blocks the merge. "
+                    "One click — clear proof that GRPO training works."
                     "</p></div></section>"
                 )
                 with gr.Row(elem_classes=["ds-row"]):
@@ -1228,8 +1232,8 @@ with gr.Blocks(title="Bug Code Arena") as demo:
             with gr.Tab("Leaderboard"):
                 gr.HTML(
                     "<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
-                    "<p class='ds-lead ds-lead--tight'>Run the same <strong>N</strong> missions for Junior and Senior. "
-                    "Compare reward, recall, and wins by bug family.</p></div></section>"
+                    "<p class='ds-lead ds-lead--tight'>Run <strong>N</strong> identical missions for both models. "
+                    "Compare reward, recall, and win rate across every bug family.</p></div></section>"
                 )
                 with gr.Row(elem_classes=["ds-row"]):
                     with gr.Column(elem_classes=["ds-group"]):
@@ -1243,10 +1247,10 @@ with gr.Blocks(title="Bug Code Arena") as demo:
                             choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
                             value="random", label="Adversary style",
                         )
-                        btn_compare = gr.Button("Run leaderboard", variant="primary")
+                        btn_compare = gr.Button("Run Leaderboard", variant="primary")
                 cmp_summary = gr.HTML(
                     "<section class='ds-card' role='status'><div class='ds-card__body'>"
-                    "<p class='ds-lead ds-lead--tight'>Press <strong>Run leaderboard</strong> to fill the scoreboard and charts.</p>"
+                    "<p class='ds-lead ds-lead--tight'>Press <strong>Run Leaderboard</strong> to populate the scoreboard and charts.</p>"
                     "</div></section>"
                 )
                 with gr.Row(elem_classes=["ds-row"]):
@@ -1338,9 +1342,9 @@ with gr.Blocks(title="Bug Code Arena") as demo:
             with gr.Tab("Real PR"):
                 gr.HTML(
                     "<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
-                    "<p class='ds-lead ds-lead--tight'>Paste a unified diff, or paste a <strong>GitHub URL</strong> and "
-                    "fetch. This demo does <em>not</em> run the PR's tests — scoring checks whether <code>ISSUES</code> "
-                    "cites the stale refs you list below.</p></div></section>"
+                    "<p class='ds-lead ds-lead--tight'>Paste a unified diff directly, or provide a <strong>GitHub URL</strong> to fetch it. "
+                    "Tests are not executed — scoring checks whether your <code>ISSUES</code> field cites the stale refs listed below.</p>"
+                    "</div></section>"
                 )
                 with gr.Row(elem_classes=["ds-row"]):
                     with gr.Column(elem_classes=["ds-group"]):
@@ -1468,18 +1472,20 @@ with gr.Blocks(title="Bug Code Arena") as demo:
                 gr.HTML(
                     "<section class='ds-card ds-doc'><div class='ds-card__body'>"
                     "<h3 class='ds-h2'>How it works</h3>"
-                    "<p class='ds-subtitle'>A generator mutates the repo; a PR still references the old API. "
-                    "The test run fails — that is the oracle. The reviewer must <strong>name stale refs</strong>, "
-                    "<strong>trace the failure path</strong>, and <strong>request changes</strong>.</p>"
-                    "<h3 class='ds-h2'>Reward</h3>"
-                    "<p class='ds-subtitle'>Causal multi-part score: root cause, path, verdict, confidence calibration, "
-                    "minus hallucination.</p>"
+                    "<p class='ds-subtitle'>A drift agent mutates the codebase — renaming a function, changing a "
+                    "contract, flipping a condition. A PR is opened that still references the old API. The test suite "
+                    "fails. The reviewer's job: <strong>name the stale reference</strong>, "
+                    "<strong>trace the failure path</strong>, and <strong>block the merge</strong>.</p>"
+                    "<h3 class='ds-h2'>Reward signal</h3>"
+                    "<p class='ds-subtitle'>Nine additive components: catch, root cause, failure path, verdict, "
+                    "confidence calibration, error-type named, hard-pattern bonus, completeness bonus, "
+                    "and a hallucination penalty. GRPO uses the full gradient width.</p>"
                     "<h3 class='ds-h2'>Training</h3>"
-                    "<p class='ds-subtitle'>TRL GRPO on a small instruct model with LoRA; curriculum escalates when the "
-                    "reviewer wins too often.</p>"
+                    "<p class='ds-subtitle'>TRL GRPOTrainer on Qwen2.5-1.5B-Instruct with 4-bit QLoRA. "
+                    "The curriculum escalates difficulty and adversary style as the reviewer improves.</p>"
                     "<h3 class='ds-h2'>Evaluation</h3>"
-                    "<p class='ds-subtitle'>Held-out bug families and the V2 evaluator script measure generalization "
-                    "beyond the training mix.</p>"
+                    "<p class='ds-subtitle'>Held-out bug families — condition flips and off-by-one errors — "
+                    "are never seen during training. The leaderboard and gauntlet measure generalization in real time.</p>"
                     "</div></section>"
                 )
         
