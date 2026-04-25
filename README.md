@@ -9,156 +9,263 @@ app_file: app.py
 pinned: false
 ---
 
-# CodeDrift Arena
+# 🏟️ CodeDrift Arena
 
-**Train a code reviewer under live schema drift.** A frozen adversary mutates the synthetic repo (renames, deletions, API contract changes). The reviewer sees the **current** codebase plus a **PR diff** that may still reference the old world. A **deterministic scorer** turns the review into a GRPO-ready reward—no human labels per step.
-
-> **30-second hook:** The UI shows **today’s codebase** and a diff written for **yesterday’s**. If they disagree, merging breaks production — the job is to **catch that mismatch** before ship.
+> **An OpenEnv environment for training and evaluating code-review LLMs under live codebase drift.**
+> A frozen adversary mutates the world (renames, deletions, API contract changes, type/condition/off-by-one bugs).
+> The reviewer must read the **PR diff** plus the **failing pytest output** and trace the failure to its **exact root cause**.
+> Reward is multi-component and **causal**, not text-matching.
 
 | | |
 |--|--|
-| **Repo** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
-| **🚀 Live Demo** | [![HF Space](https://img.shields.io/badge/🤗%20HuggingFace-Space-blue)](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) |
-| **Stack** | Python · Gradio (CPU demo) · TRL GRPO + bitsandbytes QLoRA + optional Unsloth (GPU train) · OpenEnv HTTP bridge |
+| 🚀 **Live demo** | [![HF Space](https://img.shields.io/badge/🤗%20HuggingFace-Space-blue)](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) |
+| 📂 **Source** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
+| 🧱 **Stack** | Python · Gradio (CPU demo) · FastAPI + `openenv-core` (HTTP bridge) · TRL GRPO + bitsandbytes QLoRA + optional Unsloth (GPU train) · pytest as ground-truth oracle (V2) |
+| 🧪 **Tests** | 43 v1 + 19 v2, all passing locally and in CI |
 
 ---
 
-## Submission Materials
+## 🎯 Hackathon theme fit
 
-- **OpenEnv manifest**: `openenv.yaml`
-- **Colab notebook**: `colab/CodeDrift_GRPO.ipynb`
-- **Training plots**: `demo/training_reward_curve.png` (replace placeholder with real run)
-- **Trained adapter (HF model card/link)**: `TODO`
-- **Mini-blog or <2 min demo video**: `TODO`
-
----
-
-## Why judges care (30 seconds)
-
-1. **Clear story** — Oversight agent (reviewer) vs adversary (drift) in a shared codebase; drift is structured and inspectable.
-2. **Real RL hook** — Single-step MDP, dense sparse-ish reward, offline episode rows for fast iteration.
-3. **Demo-safe CPU path** — Space runs **env + scorer only**; paste any model output and see reward + JSON breakdown instantly.
-4. **Novelty without black boxes** — Drift types and ground-truth `DriftAction`s are explicit; reward rules are readable in `rewards/scorer.py`.
+| Theme | Fit | Why |
+|-------|------|-----|
+| **#3.1 World Modeling — Professional Tasks** | **PRIMARY** ✅ | Real codebase, real test execution as ground truth, multi-step reasoning over a partially observable repo, causal reward instead of pattern matching. |
+| **#4 Self-Improvement** | Strong | Adaptive adversary, replay buffer of hard episodes, weakness-weighted curriculum, difficulty auto-promotion (`easy → medium → hard`). |
+| **#5 Wild Card** | Strong | "Code review under schema drift" is a novel and concrete RL framing for an LLM oversight problem. |
+| **#1 Multi-Agent** | Partial | Reviewer vs adversary loop with adaptive opponent, but not full negotiation/coalition. |
+| **#2 Long-Horizon Planning** | Partial | Episodes are single-step by design (deterministic, easy to reward). Multi-turn variant is an obvious extension. |
+| **#3.2 Personalized Tasks** | N/A | Out of scope. |
 
 ---
 
-## Judge path (under 2 minutes)
+## ⚡ 30-second hook
+
+The UI shows **today's codebase** and a PR written for **yesterday's**.
+If they disagree, merging breaks production — the reviewer's job is to **catch that mismatch** before ship.
+
+In V2 we go one step further: we **actually execute pytest** on the drifted repo, show the agent the real failing test output, and reward it for tracing the failure to the **exact stale symbol** that broke it.
+
+---
+
+## 🧭 Repo at a glance
+
+```
+codedrift-arena/
+├── env/, agents/, rewards/         # V1 stack: text-pattern reward, synthetic codebase
+├── env_v2/, agents_v2/, rewards_v2/  # V2 stack: pytest oracle + causal reward
+├── training/                       # V1 GRPO trainer (Qwen 2.5 1.5B + QLoRA)
+├── training_v2/                    # V2 GRPO trainer + curriculum + replay + generalization eval
+├── server/, integrations/          # FastAPI + OpenEnv bridges (V1 and V2)
+├── hf_space/                       # Gradio UI (synthetic arena + Real PR + Comparison Dashboard)
+├── tests/, tests_v2/               # 43 + 19 unit tests
+├── colab/                          # Colab training notebook
+├── demo/                           # Pitch demos and recorded artifacts
+└── openenv.yaml                    # OpenEnv manifest
+```
+
+---
+
+## 🏁 Three ways to run it
+
+### 1. Click around the live Space (no install)
+
+[`https://huggingface.co/spaces/Bhuneshlooper/CodeDrift`](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift)
+
+The Space has **three sections**:
+
+| Section | What it does |
+|---------|--------------|
+| 🏟️ **Synthetic Arena** | New episode → Base/Trained buttons → Score → see reward + JSON + replay row. |
+| 📊 **Comparison Dashboard** | Run N episodes; see metric cards + bar charts (per-episode, per-drift-type) + detail table. |
+| 🌍 **Real PR Scorer** | Paste a `git diff` OR a GitHub URL (PR/commit/compare). Auto-detect language + candidate stale refs. Edit + score. |
+
+### 2. Run the env + scorer locally (CPU only)
 
 ```bash
 git clone https://github.com/bansalbhunesh/codedrift-arena.git
 cd codedrift-arena
 pip install -r requirements.txt
 python scripts/smoke_env.py
-python -m unittest discover -s tests -p "test_*.py" -v
+python -m unittest discover -s tests -p "test_*.py" -v       # v1 (43 tests)
+python -m unittest discover -s tests_v2 -p "test_*.py" -v    # v2 (19 tests)
+python app.py                                                # launches Gradio
 ```
 
-Optional narrative scripts: `python demo/before_after.py` (rename, contract, deleted-module, **two drifts at once**); `python demo/pitch_demo.py` mirrors those plus pitch framing (`--scenario rename|contract|removal|multi|all`, default `all`).
+### 3. Run the OpenEnv HTTP server
 
-After each `env.step()`, **`info["metric_strip"]`** is a one-line summary (`reward`, `recall`, `verdict`, `malformed_issues`, **`grounded_in_diff`**). **`info["judge_keyword_line"]`** is a visceral headline (**`🟢 SUCCESS: …`** / **`🔴 FAILURE: …`** / partial). **`info["judge_emoji"]`** / **`info["judge_summary"]`** add **visual + plain-English** hints. **`info["judge_why_matters"]`** ties the outcome to **production impact**. **`info["confidence_strip"]`** is a **short** HIGH/MEDIUM/LOW line (e.g. `confidence: HIGH (fully grounded + full recall)`). Gradio Status shows **keyword**, emoji strip, summary, **💡 why**, then confidence.
-
-## The Winning Demo (2 Minutes)
-
-1. **Setup**: Run `python app.py` (Local) or visit the [Live Space](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift).
-2. **Step 1: The Drift**: Click **New episode**. Explain that the codebase on the right has changed (Renames/Deletions/Contracts mutated) while the PR on the left is still "stale".
-3. **Step 2: The Failure**: Click **▶ Load Base Model (Fails)** and Score it. Show the **RED FAILURE** banner. Explain that even "smart" LLMs miss these drift bugs without specific training.
-4. **Step 3: The Success**: Click **▶ Load Trained Model (Success)** and Score it. Show the **GREEN SUCCESS** banner.
-5. **Step 4: The Proof**: Point to the **Training evidence** below. Show that the model learned to cite stale identifiers in the `ISSUES:` block.
+```bash
+pip install -r requirements-server.txt
+uvicorn server.app:app --host 0.0.0.0 --port 8000      # V1 typed API
+# V2 OpenEnv app is exposed by integrations.codedrift_openenv_v2.build_openenv_app_v2()
+```
 
 ---
 
-## GRPO Training on Colab (T4 GPU)
+## 🔁 The two arenas (V1 and V2 side by side)
 
-To win, you need real training data. We use **GRPO** (Group Relative Policy Optimization) which optimizes for the deterministic reward without human labels.
+| | **V1 — Text-pattern arena** | **V2 — Executable arena** |
+|--|------------------------------|----------------------------|
+| Ground truth | Hand-coded `DriftAction` tokens | **Real pytest output** on a freshly mutated repo |
+| Mutation | Symbol-table edits | **AST-level edits** (`libcst`-style with stdlib `ast`) |
+| Bug patterns | rename, removal, contract | All 8: rename, removal, contract, partial_rename, null_missing, type_mismatch, condition_flip, off_by_one |
+| Reviewer output | `VERDICT` + `ISSUES` + `REASON` | Adds **`ROOT_CAUSE`**, **`FAILURE_PATH`**, **`CONFIDENCE`** |
+| Reward | Recall over stale tokens + diff grounding | **Multi-component causal reward** (root_cause, failure_path, verdict, calibration, hallucination) |
+| Tests | 43 unit tests | 19 unit tests |
+| Demo entry | `demo/before_after.py`, Gradio | `demo/v2_pitch_demo.py`, Gradio dashboard |
 
-1. **Open Colab**: Use `colab/CodeDrift_GRPO.ipynb` with a T4 GPU runtime.
-2. **Install Deps**:
-   ```bash
-   pip install -r https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/requirements-train.txt
-   ```
-3. **Run Training**:
-   ```python
-   # Run the train.py script directly or copy contents of training/train.py
-   !python training/train.py --episodes 100 --steps 50 --backend unsloth
-   ```
-   Use `--backend hf` for the stable Hugging Face fallback.
-4. **Export Evidence**: The script saves a `final` LoRA adapter and logs to W&B. Commit reward plots (PNG) and link the trained adapter in the Submission Materials section.
+V1 stays untouched so existing demos still work. V2 modules live in `env_v2/`, `agents_v2/`, `rewards_v2/`, `training_v2/`, `tests_v2/`.
 
 ---
 
-## Architecture
+## 🧱 Architecture
+
+### V1 (text-pattern arena)
 
 ```mermaid
 flowchart LR
-  subgraph setup [Episode setup]
-    B[Base codebase]
-    D[DriftAgent]
-    B --> D
-    D --> S[Drifted state + ground-truth actions]
-    S --> G[PR diff generator]
-  end
-  subgraph agent [Reviewer]
-    G --> O[Observation: prompt + diff + codebase]
-    O --> R[Model or scripted review]
-  end
-  subgraph reward [Reward]
-    R --> X[RewardScorer]
-    X --> RW[Scalar reward + info dict]
-  end
+  Base[Base codebase] --> Drift[DriftAgent]
+  Drift --> Drifted[Drifted codebase + ground-truth actions]
+  Drifted --> Diff[PR diff generator]
+  Diff --> Obs[Observation]
+  Obs --> Reviewer[Reviewer LLM]
+  Reviewer --> Score[RewardScorer]
+  Score --> Reward[Scalar reward + info dict]
 ```
 
-- **`DriftAgent`** (`agents/drift_agent.py`) — frozen; personalities (`random`, `subtle`, `aggressive`, `escalating`, `adaptive`) and difficulty (`easy` / `medium` / `hard`) control challenge.
-- **`CodeDriftEnv`** (`env/codedrift_env.py`) — builds observation, caches reset obs through the single `step` (see API notes below).
-- **`RewardScorer`** (`rewards/scorer.py`) — parses **`ISSUES:`** only for “did you cite the stale artifact?”; **`VERDICT:`** must be explicit.
+### V2 (executable arena, primary submission)
+
+```mermaid
+flowchart LR
+  subgraph world [World V2]
+    BR[Tiny base_repo<br/>src/ + tests/]
+    Mut[GeneratorAgent<br/>AST mutators]
+    Run[ExecEngine<br/>subprocess pytest]
+    BR --> Mut --> Run
+  end
+  subgraph reviewer [Reviewer Loop]
+    Obs[ObservationV2<br/>diff + pytest output]
+    Pol[Reviewer LLM]
+    Par[Structured parser]
+    Run --> Obs --> Pol --> Par
+  end
+  subgraph reward [Causal Reward]
+    RC[root_cause score]
+    FP[failure_path score]
+    VR[verdict bonus]
+    CA[calibration]
+    HAL[hallucination penalty]
+    Par --> RC & FP & VR & CA & HAL
+  end
+  RC & FP & VR & CA & HAL --> R[Scalar reward in -1..+2]
+```
 
 ---
 
-## Review format (models must follow this)
-
-The reviewer should answer in **exactly** this shape (used by the scorer and prompts):
+## ✍️ Review format the scorer expects
 
 ```text
 VERDICT: APPROVE | REQUEST_CHANGES
-ISSUES: … list every stale reference, or write none …
-REASON: one sentence.
+ROOT_CAUSE: <file_path>::<symbol>          # e.g. src/orders.py::createOrder
+FAILURE_PATH: test_id → caller → symbol
+CONFIDENCE: 0.0..1.0
+ISSUES: <cite each stale reference here>
+REASON: one sentence
 ```
 
-**Scoring intuition (drifted PR):** credit comes from citing **stale** symbols / old signatures in **`ISSUES`**, with **`REQUEST_CHANGES`** when appropriate. Mentioning only the **new** name does not count as catching drift. Clean PRs (`n_stale_refs == 0`) expect **`VERDICT: APPROVE`** with **`ISSUES: none`** (or equivalent).
-
-**Important:** `RewardScorer` parses mentions from **`ISSUES:`** (plus explicit **`VERDICT:`**).  
-Diff grounding is also tracked and now softly affects catch reward when a non-empty diff is provided, while ISSUES remains the primary evidence channel.
-
-**Pitch honesty:** The rubric scores **coverage of known drift** (did ISSUES cite the right stale artifacts with the right verdict shape)—not whether every sentence of reasoning is factually perfect.
+In V1 only `VERDICT` / `ISSUES` / `REASON` are required; in V2 the structured fields drive the causal reward components.
 
 ---
 
-## Live demo: failure modes (read before recording)
+## 🧮 How the V2 reward is built
 
-| Pitfall | What happens | Fix |
-|--------|----------------|-----|
-| Second **Score** without **New episode** | `RuntimeError` — single-step env | Click **New episode** between runs |
-| Model skips **`ISSUES:`** | `malformed_issues`, no mention credit | Show the required template on-screen |
-| Missing **`VERDICT:`** line | Defaults to **REQUEST_CHANGES** | Same — enforce template |
-| Judging “wrong line number” in prose | Not scored; only ISSUES tokens + verdict | Say that in the pitch |
+```
+R = 1.0 * root_cause            # exact symbol match (file::name preferred, partial credit allowed)
+  + 0.6 * failure_path          # ordered overlap with ground-truth chain
+  + 0.2 * verdict               # APPROVE iff no failing test, else REQUEST_CHANGES
+  - 0.4 * hallucination         # predicted symbol absent from repo / diff
+  - 0.2 * calibration_error     # Brier-style penalty for over- or under-confidence
+```
 
----
-
-## Install matrix
-
-| Goal | Command |
-|------|---------|
-| **HF Space / local CPU** | `pip install -r requirements.txt` |
-| **GRPO training** (GPU, e.g. Colab) | `pip install -r requirements-train.txt` |
-| **OpenEnv HTTP server** | `pip install -r requirements-server.txt` then `uvicorn server.app:app --host 0.0.0.0 --port 8000` |
-
-Copy [`.env.example`](.env.example) to `.env` and set `CODEDRIFT_HF_*`, `WANDB_*` when you want clean logs and metadata (optional for the minimal demo).
+`R` is clamped to `[-1.0, +2.0]`. Malformed predictions (no JSON / wrong keys) get a fixed `-0.5` so the model can't game the system by emitting noise.
 
 ---
 
-## Production server config
+## 🧰 What's in the Space UI
 
-`server/app.py` now includes production guardrails for auth, abuse prevention, signed sessions, and metrics access control.
+### 🏟️ Synthetic Arena
+- **🔄 New episode** → spawn a drifted repo + diff + failing-test output
+- **▶ Base Model (Fails)** → fixed-text APPROVE; demonstrates a naive baseline
+- **▶ Trained Model (Wins)** → **episode-aware**: builds the structured response from the **actual** stale refs of the current episode, so the win is real, not a fixed string
+- **⚖️ Score review** → run scorer; see headline status + JSON + replay row
+- **🚀 Run Benchmark** → N-episode aggregate Base vs Trained
+- **🔁 Replay Failure Cases** → keeps the last 8 scored attempts visible
 
-Recommended baseline (private deployment):
+### 📊 Comparison Dashboard
+- **Headline metric cards**: Avg reward, Avg recall, Win rate, Ties (with delta arrows + color)
+- **Bar chart**: per-episode reward, colored by policy
+- **Bar chart**: avg reward by drift type, colored by policy
+- **Detail table**: episode, drift_type, stale_ref, base_reward, trained_reward, delta
+
+### 🌍 Real PR Scorer
+- **🔗 GitHub URL** (PR / commit / compare / raw) → click **Fetch from GitHub** → diff + candidate stale refs auto-populate
+- **📥 Paste diff** directly (any language) — Python, JS/TS, Go, Java, Rust, C/C++, Swift, Kotlin, Ruby, PHP, Scala, C#
+- **🔎 Detect** → languages + candidate stale references (heuristic, editable)
+- **⚖️ Score Real PR** → reuses the V1 reward pipeline against your confirmed stale refs
+
+---
+
+## 🧪 GRPO training paths
+
+### V1 trainer (existing, deterministic-reward GRPO)
+
+```bash
+pip install -r requirements-train.txt
+python training/train.py --episodes 200 --steps 100 --backend hf
+```
+
+### V2 trainer (executable + causal reward)
+
+```bash
+pip install -r requirements-train.txt
+python training_v2/train_v2.py --episodes 200 --steps 100 --output_dir outputs/v2_run
+```
+
+Both trainers ship dtype guards and a Windows UTF-8 self-restart so they run on Colab T4 + on Python 3.11/3.12 venvs cleanly.
+
+### Held-out generalization eval (V2)
+
+```bash
+python training_v2/eval_generalization_v2.py --policy oracle  --episodes 30 --out outputs/v2_eval_oracle.jsonl
+python training_v2/eval_generalization_v2.py --policy approve --episodes 30 --out outputs/v2_eval_baseline.jsonl
+python training_v2/eval_generalization_v2.py --policy llm --model Qwen/Qwen2.5-1.5B-Instruct --adapter outputs/v2_run/final --episodes 30 --out outputs/v2_eval_trained.jsonl
+python utils_v2/plot_curve.py --input outputs/v2_eval_oracle.jsonl --out_curve outputs/v2_curve.png --out_bars outputs/v2_bars.png
+```
+
+Train pattern set: `{rename, removal, contract, partial_rename, null_missing}`.
+Held-out pattern set: `{type_mismatch, condition_flip, off_by_one}`.
+You get per-component reward, root-cause accuracy, and a per-pattern bar chart.
+
+---
+
+## 🔌 OpenEnv bridge
+
+| Manifest | Server entrypoint |
+|----------|-------------------|
+| `openenv.yaml` | `uvicorn server.app:app --host 0.0.0.0 --port 8000` |
+
+V1 typed API:
+
+- `POST /api/v1/reset` — returns signed `session_id` + initial observation
+- `POST /api/v1/step` — single-use session scoring (`409` on replay)
+
+V2 OpenEnv app:
+
+- `from integrations.codedrift_openenv_v2 import build_openenv_app_v2`
+- Same `reset` / `step` shape, structured ObservationV2 with `pytest_output`, `failing_tests`, `repo_snapshot`, etc.
+
+---
+
+## 🧱 Production server config (V1)
 
 ```bash
 export CODEDRIFT_REQUIRE_AUTH=1
@@ -168,86 +275,74 @@ export CODEDRIFT_API_RATE_LIMIT_RPM=120
 export CODEDRIFT_API_MAX_BODY_BYTES=262144
 export CODEDRIFT_SESSION_TTL_SECONDS=900
 export CODEDRIFT_SESSION_SIGNING_KEY=change-me-strong-secret
-export CODEDRIFT_SESSION_PREVIOUS_SIGNING_KEYS=
-export CODEDRIFT_SESSION_MIN_SUPPORTED_SCHEMA_VERSION=1
 export CODEDRIFT_METRICS_ACCESS=read
-export CODEDRIFT_LOG_FORMAT=json
 ```
 
 Optional for multi-instance deployments:
 
-- Set `CODEDRIFT_REDIS_URL` to enable shared rate limits and shared session storage across replicas.
-- Without Redis, set `CODEDRIFT_MAX_IN_MEMORY_SESSIONS` to bound RAM from unbounded `/api/v1/reset` abuse (oldest sessions are evicted first).
-- Rotate session signing keys with `CODEDRIFT_SESSION_PREVIOUS_SIGNING_KEYS` (comma-separated old keys).
-- Set `CODEDRIFT_TRUSTED_PROXIES` to a comma-separated list of addresses your app sees as the **direct client** for each trusted reverse proxy (same value space as the connection IP). Only then is `X-Forwarded-For` used for rate-limit keys; otherwise spoofed headers are ignored.
-
-Typed API endpoints:
-
-- `POST /api/v1/reset` → returns signed `session_id` + initial observation.
-- `POST /api/v1/step` → single-use session scoring (`409` on replay).
+- `CODEDRIFT_REDIS_URL` — shared rate limits + session storage
+- `CODEDRIFT_MAX_IN_MEMORY_SESSIONS` — RAM cap when Redis is off
+- `CODEDRIFT_SESSION_PREVIOUS_SIGNING_KEYS` — graceful key rotation
+- `CODEDRIFT_TRUSTED_PROXIES` — IPs allowed to set `X-Forwarded-For`
 
 ---
 
-## Environment API (important for demos & training)
+## 📦 Install matrix
 
-| Method | Purpose |
-|--------|---------|
-| `reset()` | New random episode; drift agent runs; `episode_id` assigned. |
-| `set_clean_episode(pr_diff)` | No drift; canonical codebase; for clean-PR training rows. |
-| `inject_episode(...)` | Scripted episode for tests/demos; optional `validate=True` checks consistency. |
-| `step(agent_response)` | **Single-step:** returns the **same** `Observation` as at episode start; `done` is `True`. |
-| `debug_snapshot()` | Small dict: `episode_id`, `episode_ready`, `n_stale_refs`, etc. |
-
-**Gotchas (live demo):**
-
-- Calling **`step()` twice** without a new `reset` / `inject_episode` / `set_clean_episode` raises **`RuntimeError`** (by design).
-- After scoring in the Gradio Space, click **New episode** before scoring again.
-- If the model skips an **`ISSUES:`** block, mention credit is **zero** (malformed); do not put evidence only in **`REASON`**.
+| Goal | Install | Run |
+|------|---------|-----|
+| **HF Space / local CPU** | `pip install -r requirements.txt` | `python app.py` |
+| **OpenEnv HTTP server** | `pip install -r requirements-server.txt` | `uvicorn server.app:app --host 0.0.0.0 --port 8000` |
+| **GRPO training** | `pip install -r requirements-train.txt` | `python training/train.py` or `python training_v2/train_v2.py` |
+| **V2 plotting** | `pip install matplotlib` | `python utils_v2/plot_curve.py --input outputs/v2_eval.jsonl ...` |
 
 ---
 
-## Training (outline)
+## 🧯 Live demo: known pitfalls
 
-```bash
-pip install -r requirements-train.txt
-python training/train.py --help
-```
-
-Dataset rows are pre-generated episodes plus clean rows; the reward function deserializes ground-truth actions. Row-level failures log a traceback and assign **`-1.0`** (same scale as a single miss) so one bad batch line does not crash the trainer or dominate reward curves. Set `CODEDRIFT_LOG_LEVEL=DEBUG` to see per-row `recall` / outcome in training logs.
+| Pitfall | What happens | Fix |
+|---------|--------------|-----|
+| Click `Score` twice without `New episode` | `RuntimeError` — single-step env | Click `🔄 New episode` first |
+| Reviewer skips `ISSUES:` | `malformed_issues=true`, no mention credit | Use the on-screen template |
+| Reviewer cites only the new symbol | Counts as missed drift | Cite the **stale** identifier |
+| Real PR detector returns `none` | Diff has no clean +/- pairs (e.g. only additions) | Edit stale refs manually |
 
 ---
 
-## Repository layout
+## ✅ Submission checklist
 
-| Path | Role |
+- [x] Live HF Space — [`Bhuneshlooper/CodeDrift`](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift)
+- [x] OpenEnv manifest (`openenv.yaml`)
+- [x] V1 stack (env + reward + GRPO trainer + tests)
+- [x] V2 stack (executable env + causal reward + curriculum + replay + tests)
+- [x] Real-PR scorer with multi-language auto-detect + GitHub URL fetch
+- [x] Comparison Dashboard with metric cards + bar charts
+- [x] Held-out generalization eval script
+- [x] Colab training notebook (`colab/CodeDrift_GRPO.ipynb`)
+- [ ] Run 200+ step training run, commit reward curves under `outputs/v2_run/`
+- [ ] Link the trained adapter (HF model card)
+- [ ] Record a 60-90 second demo video
+
+---
+
+## 📚 Where to read the code
+
+| Area | Path |
 |------|------|
-| `env/` | `CodeDriftEnv`, synthetic `CodebaseState`, PR diff generation |
-| `agents/` | `DriftAgent`, `DriftAction` |
-| `rewards/` | `RewardScorer` |
-| `training/` | `train.py` (GRPO) |
-| `hf_space/` | Gradio UI (`space_app.py`) |
-| `server/` | FastAPI OpenEnv app |
-| `integrations/` | OpenEnv bridge, shared config |
-| `codedrift/` | `constants.py`, `logutil.py` |
-| `tests/` | Scorer + env lifecycle regressions |
-| `scripts/smoke_env.py` | Quick env + OpenEnv stub check |
+| V1 env / agents / reward | [`env/codedrift_env.py`](env/codedrift_env.py), [`agents/drift_agent.py`](agents/drift_agent.py), [`rewards/scorer.py`](rewards/scorer.py) |
+| V2 env / generator / scorer | [`env_v2/exec_arena_env.py`](env_v2/exec_arena_env.py), [`agents_v2/generator_agent.py`](agents_v2/generator_agent.py), [`rewards_v2/causal_scorer.py`](rewards_v2/causal_scorer.py) |
+| V2 training + curriculum | [`training_v2/train_v2.py`](training_v2/train_v2.py), [`training_v2/curriculum.py`](training_v2/curriculum.py), [`training_v2/replay.py`](training_v2/replay.py) |
+| V2 generalization eval | [`training_v2/eval_generalization_v2.py`](training_v2/eval_generalization_v2.py) |
+| Gradio Space UI | [`hf_space/space_app.py`](hf_space/space_app.py), [`hf_space/real_pr_scorer.py`](hf_space/real_pr_scorer.py) |
+| OpenEnv bridges | [`integrations/codedrift_openenv.py`](integrations/codedrift_openenv.py), [`integrations/codedrift_openenv_v2.py`](integrations/codedrift_openenv_v2.py) |
+| Tests | [`tests/`](tests/), [`tests_v2/`](tests_v2/) |
 
 ---
 
-## Observability
+## 📝 License
 
-Set `CODEDRIFT_LOG_LEVEL=DEBUG` for verbose logs (`codedrift/logutil.py`). Episode logs include **`episode_id`** on reset and step for correlating Space, OpenEnv, and training runs.
+MIT — see [`LICENSE`](LICENSE).
 
 ---
 
-## Contributing / hackathon fork checklist
-
-- [x] Deploy Space → **Live at https://huggingface.co/spaces/Bhuneshlooper/CodeDrift**
-- [x] Add OpenEnv manifest (`openenv.yaml`)
-- [x] Add Colab training notebook (`colab/CodeDrift_GRPO.ipynb`)
-- [ ] Run `python scripts/smoke_env.py` and unit tests before recording.
-- [ ] Run 200+ step training and commit reward plots (`demo/*.png`)
-- [ ] Link trained adapter + mini-blog/video in **Submission Materials**
-- [ ] Rehearse: one **New episode** → click **▶ Load Trained Model** → **Score review** → **New episode** again.
-
-Questions or tight demo slots: open an issue on the repo with your Space link and intended model backend (optional).
+Questions or tight demo slots: open an issue with your Space link.
