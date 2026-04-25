@@ -26,7 +26,7 @@ A **generator** mutates a mini-repo (renames, removals, contract changes, and mo
 
 ---
 
-## What this is (plain English)
+## What this is
 
 A **training arena** where a model learns to review code like a **senior engineer**—not style nitpicks, but **real bugs** before they ship.
 
@@ -243,6 +243,41 @@ V1 is kept for backward compatibility; new work targets **V2** paths in `env_v2/
 ### About tab
 
 Short explanation of **setup**, **reward**, **training**, and **evaluation** in plain language.
+
+---
+
+## Training diagnostics — why reward was flat and how it is fixed
+
+The original run showed reward as a flat line near zero across all steps. Root cause analysis:
+
+| # | Root cause | Effect | Fix |
+|---|---|---|---|
+| 1 | `max_completion_length=256` — too short | ISSUES section always truncated mid-sentence → `_parse_issues_section` fails → `issues_norm=""` → every stale ref scores `−1.0` | Raised default to **512** |
+| 2 | All 4 completions score −1.0 → `std=0` | GRPO advantage = `(reward−mean)/std = 0/0` → zero gradient → flat loss forever | Raised `num_generations` to **8**, `temperature` to **1.0** |
+| 3 | TRL ≥0.15 passes completions as message dicts | `scorer.score(agent_response={"role":"assistant",...})` — scorer sees Python repr, not text | Added `_to_text()` helper to extract string from any completion format |
+| 4 | No SFT warmup | Base model outputs random text, never the VERDICT/ISSUES format → all malformed → back to root cause 1 | Added `--sft_warmup_steps 50` (default on) |
+| 5 | Reward cliff: −1.0 for any format error, +1.0 for correct | No intermediate gradient — model can't climb from bad to good | Added `_format_scaffold`: +0.03 per format field present, max +0.18 |
+
+**How to read the training logs:**
+
+Look for `reward_fn batch: n=8 mean=X std=Y` in the logs.
+- `std < 0.05` → low variance → increase `--temperature` or `--num_generations`
+- `mean` slowly rising from `~−0.8` toward `~0.5+` → healthy learning
+- `mean` stuck at `−1.0` → completions still truncated, increase `--max_completion_length`
+
+**Recommended Colab run command** (T4 GPU, ~2h):
+```bash
+python training/train.py \
+  --difficulty easy \
+  --personality random \
+  --steps 300 \
+  --episodes 600 \
+  --sft_warmup_steps 50 \
+  --max_completion_length 512 \
+  --num_generations 8 \
+  --temperature 1.0 \
+  --no_wandb
+```
 
 ---
 

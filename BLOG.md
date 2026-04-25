@@ -185,6 +185,37 @@ Delta: **+3.05** per episode. Across the **Gauntlet** (10 rounds): Senior wins 9
 
 ---
 
+## Why the Model Wasn't Learning (and How We Fixed It)
+
+After the first training run, the reward curve was a flat line at approximately zero for the entire 200 steps. Here is the exact diagnosis:
+
+**Root cause 1 — Completion truncation (most critical)**
+`max_completion_length=256` was too short. A complete structured response — VERDICT + ROOT_CAUSE + FAILURE_PATH + CONFIDENCE + ISSUES + REASON — needs 200–400 tokens. Every response was being cut mid-ISSUES section. The scorer's `_parse_issues_section` failed → `issues_norm=""` → `_mentioned()=False` → every stale ref scored `−1.0` regardless of the content before the cutoff.
+
+**Root cause 2 — GRPO advantage was mathematically zero**
+GRPO computes `advantage = (reward − mean) / std` within each group of completions. When every completion in a group of 4 scored `−1.0`, `std=0`. Dividing by zero is clamped to 0. Zero advantage = zero gradient = the model cannot update = flat loss for every step.
+
+**Root cause 3 — Chat-format completion handling**
+TRL ≥0.15 with `processing_class` returns completions as `[{"role":"assistant","content":"..."}]`. The old reward function passed the raw dict to the scorer. The scorer received Python repr text, found no VERDICT/ISSUES markers, scored `−1.0`.
+
+**Root cause 4 — No SFT warmup**
+The base model (Qwen2.5-1.5B-Instruct) had never seen the VERDICT/ROOT_CAUSE/FAILURE_PATH format. Every early rollout was random prose. With root cause 2 in place, this meant the first N steps gave zero signal — and the model stayed stuck.
+
+**Root cause 5 — Reward cliff**
+The reward jumped from `−1.0` (wrong/malformed) to `+1.0+` (correct). No intermediate values. GRPO needs a gradient, not a step function.
+
+**The five fixes applied:**
+
+| Fix | Change | Effect |
+|---|---|---|
+| Completion length | 256 → **512** | ISSUES section no longer truncated |
+| Generations + temp | 4 / 0.8 → **8 / 1.0** | Reward std rises, GRPO advantage becomes non-zero |
+| `_to_text()` helper | Extract string from any TRL completion format | Scorer receives clean text |
+| SFT warmup | 50 steps before GRPO (default on) | Model starts GRPO knowing the format |
+| Format scaffold | +0.03 per format field, max +0.18 | Gradient bridge from −1.0 toward 0 |
+
+---
+
 ## Technical Stack
 
 | Layer | What we used |
