@@ -291,6 +291,7 @@ def _serialize_actions(actions: list[DriftAction]) -> list[dict[str, object]]:
             "stale_ref": a.stale_ref,
             "current_ref": a.current_ref,
             "metadata": a.metadata,
+            "bug_pattern": a.bug_pattern,
         }
         for a in actions
     ]
@@ -308,6 +309,7 @@ def _deserialize_actions(payload: list[dict[str, object]]) -> list[DriftAction]:
                     stale_ref=str(d["stale_ref"]),
                     current_ref=str(d["current_ref"]),
                     metadata=dict(d.get("metadata") or {}),
+                    bug_pattern=str(d.get("bug_pattern") or ""),
                 )
             )
         except KeyError as exc:
@@ -423,6 +425,7 @@ class ApiObservation(BaseModel):
     prompt: str
     pr_diff: str
     codebase_context: str
+    test_output: str
     episode_step: int
     n_stale_refs: int
     episode_id: str
@@ -483,6 +486,7 @@ def api_reset(payload: ResetRequest, request: Request) -> dict[str, object]:
             prompt=obs.prompt,
             pr_diff=obs.pr_diff,
             codebase_context=obs.codebase_context,
+            test_output=obs.test_output,
             episode_step=obs.episode_step,
             n_stale_refs=obs.n_stale_refs,
             episode_id=env.episode_id,

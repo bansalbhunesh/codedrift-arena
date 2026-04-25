@@ -27,35 +27,41 @@ from typing import Any, Optional
 from agents.drift_agent import DriftAction, DriftAgent
 from codedrift.constants import DIFFICULTIES, PERSONALITIES
 from env.codebase import CodebaseState, build_base_codebase
+from env.failure_cascade import FailureCascade, FailureCascadeSimulator
 from env.pr_generator import PRDiffGenerator
 from rewards.scorer import RewardScorer
 
 logger = logging.getLogger(__name__)
 
-REVIEWER_SYSTEM_PROMPT = """You are a senior software engineer doing a code review.
+REVIEWER_SYSTEM_PROMPT = """You are a senior software engineer debugging a failing test suite.
 
 You have been given:
-1. The CURRENT state of the codebase (functions, files, APIs)
-2. A PR diff proposing new changes
+1. Test execution output showing WHICH tests failed and HOW they cascaded
+2. The CURRENT state of the codebase (functions, files, APIs)
+3. A PR diff that was recently merged into this codebase
 
-Your job: carefully check whether the PR references anything that no longer
-exists or has changed in the current codebase (renamed functions, deleted files,
-updated API signatures).
+Your job: trace the test failures to their root cause in the PR.
+Identify the exact function rename, file deletion, or API signature change
+that caused the observed failure cascade.
 
 Respond EXACTLY in this format — no other text:
 
 VERDICT: [APPROVE | REQUEST_CHANGES]
+ROOT_CAUSE: [the exact stale reference — function name, file path, or API call]
+FAILURE_PATH: [test_that_failed → calling_function → broken_reference]
+CONFIDENCE: [0.0-1.0]
 ISSUES: [describe every stale reference found, or write 'none']
 REASON: [one sentence explaining your verdict]"""
 
 
 @dataclass
 class Observation:
-    prompt: str  # full prompt ready to feed to the LLM
-    pr_diff: str  # raw diff text
-    codebase_context: str  # formatted codebase state
+    prompt: str           # full prompt ready to feed to the LLM
+    pr_diff: str          # raw diff text
+    codebase_context: str # formatted codebase state
+    test_output: str      # simulated test execution output
     episode_step: int
-    n_stale_refs: int  # count (not content — agent doesn't see this)
+    n_stale_refs: int     # count (not content — agent doesn't see this)
 
 
 class CodeDriftEnv:
@@ -80,11 +86,13 @@ class CodeDriftEnv:
         self.drift_agent = DriftAgent(personality=personality, seed=seed)
         self.pr_gen = PRDiffGenerator(seed=seed)
         self.scorer = RewardScorer()
+        self._cascade_sim = FailureCascadeSimulator(seed=seed)
 
         self._base: Optional[CodebaseState] = None
         self._drifted: Optional[CodebaseState] = None
         self._actions: list[DriftAction] = []
         self._pr_diff: str = ""
+        self._cascade: Optional[FailureCascade] = None
         self._step: int = 0
         self._episode_ready: bool = False
         self._cached_reset_obs: Optional[Observation] = None
@@ -102,6 +110,7 @@ class CodeDriftEnv:
         self._base = build_base_codebase()
         self._drifted, self._actions = self.drift_agent.act(self._base, self.difficulty)
         self._pr_diff = self.pr_gen.generate(self._actions)
+        self._cascade = self._cascade_sim.simulate(self._actions)
         self._step = 0
         self._episode_ready = True
         self._cached_reset_obs = self._build_obs()
@@ -125,6 +134,7 @@ class CodeDriftEnv:
         self._drifted = self._base.clone()
         self._actions = []
         self._pr_diff = pr_diff
+        self._cascade = self._cascade_sim.simulate([])
         self._step = 0
         self._episode_ready = True
         self._cached_reset_obs = self._build_obs()
@@ -157,6 +167,7 @@ class CodeDriftEnv:
         self._drifted = drifted
         self._actions = act_list
         self._pr_diff = pr_diff
+        self._cascade = self._cascade_sim.simulate(act_list)
         self._step = 0
         self._episode_ready = True
         self._cached_reset_obs = self._build_obs()
@@ -192,6 +203,7 @@ class CodeDriftEnv:
             agent_response=agent_response,
             actions=self._actions,
             pr_diff=self._pr_diff,
+            failure_cascade=self._cascade,
         )
         elapsed_ms = int((time.perf_counter() - started) * 1000)
         info.setdefault("episode_id", self._episode_id)
@@ -205,9 +217,9 @@ class CodeDriftEnv:
             info.get("episode_outcome"),
             info.get("verdict"),
         )
-        # Optional self-play curriculum signal for DriftAgent(personality="adaptive").
         reviewer_won = bool(info.get("episode_outcome") == "perfect")
-        self.drift_agent.record_reviewer_result(reviewer_won)
+        drift_types = [a.drift_type for a in self._actions]
+        self.drift_agent.record_reviewer_result(reviewer_won, drift_types=drift_types)
         self._episode_ready = False
         return self._cached_reset_obs, reward, done, info
 
@@ -257,13 +269,19 @@ class CodeDriftEnv:
             "step_counter": self._step,
         }
 
+    @property
+    def failure_cascade(self) -> Optional[FailureCascade]:
+        return self._cascade
+
     def _build_obs(self) -> Observation:
         ctx = self._format_codebase(self._drifted)
-        prompt = self._build_prompt(ctx)
+        test_out = self._cascade.format_for_prompt() if self._cascade else ""
+        prompt = self._build_prompt(ctx, test_out)
         return Observation(
             prompt=prompt,
             pr_diff=self._pr_diff,
             codebase_context=ctx,
+            test_output=test_out,
             episode_step=self._step,
             n_stale_refs=len(self._actions),
         )
@@ -283,9 +301,10 @@ class CodeDriftEnv:
             lines.append(f"  {name}({', '.join(params)})")
         return "\n".join(lines)
 
-    def _build_prompt(self, codebase_ctx: str) -> str:
+    def _build_prompt(self, codebase_ctx: str, test_output: str) -> str:
         return (
             f"{REVIEWER_SYSTEM_PROMPT}\n\n"
+            f"{test_output}\n"
             f"{codebase_ctx}\n\n"
             f"=== PR DIFF ===\n{self._pr_diff}\n\n"
             f"Your review:"

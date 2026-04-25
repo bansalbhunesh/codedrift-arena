@@ -78,7 +78,18 @@ class PRDiffGenerator:
     def _build_stale_lines(self, actions: list[DriftAction]) -> list[str]:
         stale_lines = []
         for action in actions:
-            if action.drift_type == "rename":
+            pat = action.bug_pattern or action.drift_type
+            if pat == "partial_rename":
+                stale_lines.extend(self._partial_rename_lines(action))
+            elif pat == "null_missing":
+                stale_lines.extend(self._null_missing_lines(action))
+            elif pat == "type_mismatch":
+                stale_lines.extend(self._type_mismatch_lines(action))
+            elif pat == "condition_flip":
+                stale_lines.extend(self._condition_flip_lines(action))
+            elif pat == "off_by_one":
+                stale_lines.extend(self._off_by_one_lines(action))
+            elif action.drift_type == "rename":
                 stale_lines.append(f"data = {action.stale_ref}(user_id)")
             elif action.drift_type == "removal":
                 module = action.metadata.get("module", action.stale_ref)
@@ -89,3 +100,53 @@ class PRDiffGenerator:
                 param_str = ", ".join(old_params)
                 stale_lines.append(f"result = {fn}({param_str})")
         return stale_lines
+
+    def _partial_rename_lines(self, action: DriftAction) -> list[str]:
+        """Mixed diff: fresh_context uses new name correctly, stale_context doesn't."""
+        old = action.stale_ref
+        new = action.current_ref
+        fresh_ctx = action.metadata.get("fresh_context", "update_flow")
+        stale_ctx = action.metadata.get("stale_context", "legacy_path")
+        return [
+            f"# {fresh_ctx}: correctly updated",
+            f"profile = {new}(user_id)  # updated",
+            f"# {stale_ctx}: missed this one",
+            f"cached = {old}(user_id)   # BUG: stale reference",
+        ]
+
+    def _null_missing_lines(self, action: DriftAction) -> list[str]:
+        """PR accesses attribute on result of function that now returns Optional."""
+        fn = action.metadata.get("function", "get_data")
+        attr = action.metadata.get("nullable_attribute", "value")
+        return [
+            f"result = {fn}(user_id)",
+            f"value = result.{attr}  # BUG: result may be None",
+        ]
+
+    def _type_mismatch_lines(self, action: DriftAction) -> list[str]:
+        """PR passes old type (int) where new type (str) is expected."""
+        fn = action.metadata.get("function", "process")
+        param = action.metadata.get("param", "id")
+        old_example = action.metadata.get("old_example", "123")
+        return [
+            f"order = {fn}({param}={old_example})  # BUG: {param} should now be a string",
+        ]
+
+    def _condition_flip_lines(self, action: DriftAction) -> list[str]:
+        """PR passes old boolean value whose meaning has been inverted."""
+        fn = action.metadata.get("function", "validate")
+        param = action.metadata.get("param", "strict")
+        old_value = action.metadata.get("old_value", "True")
+        new_semantics = action.metadata.get("new_semantics", "semantics changed")
+        return [
+            f"result = {fn}(data, {param}={old_value})  # BUG: {param} semantics inverted",
+            f"# Note: {new_semantics}",
+        ]
+
+    def _off_by_one_lines(self, action: DriftAction) -> list[str]:
+        """PR uses 1-based index where 0-based is now expected."""
+        old_call = action.metadata.get("old_call", "getPage(page=1)")
+        new_convention = action.metadata.get("new_convention", "0-based")
+        return [
+            f"items = {old_call}  # BUG: now uses {new_convention}",
+        ]

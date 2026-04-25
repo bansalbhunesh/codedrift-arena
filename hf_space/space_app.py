@@ -88,35 +88,73 @@ def _status_lines(reward: float, info: dict[str, Any]) -> str:
 
 # --- Pre-loaded responses for judges ---
 BASE_MODEL_RESPONSE = """VERDICT: APPROVE
+ROOT_CAUSE: none
+FAILURE_PATH: n/a
+CONFIDENCE: 0.85
 ISSUES: none
-REASON: The code looks clean and follows existing patterns. Imports are correct."""
+REASON: The code looks correct and follows existing patterns."""
 
 TRAINED_MODEL_RESPONSE = """VERDICT: REQUEST_CHANGES
-ISSUES: getUserData is no longer defined in the current codebase. It was renamed to fetchUserData. Line calling getUserData(user_id) will raise a NameError at runtime.
-REASON: The PR references a stale function name. Must be updated to fetchUserData before merging."""
+ROOT_CAUSE: getUserData was renamed to fetchUserData in the current codebase
+FAILURE_PATH: test_get_user_by_id → process_feature → getUserData
+CONFIDENCE: 0.93
+ISSUES: getUserData is no longer defined. It was renamed to fetchUserData. The PR still calls getUserData(user_id) which will raise AttributeError at runtime.
+REASON: The PR references a stale function name that no longer exists — must update to fetchUserData before merging."""
 
 
-def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
+def _scenario_overrides(scenario_mode: str, difficulty: str, personality: str) -> tuple[str, str]:
+    """Map judge-friendly modes to deterministic env knobs."""
+    mode = (scenario_mode or "Random").strip().lower()
+    if mode == "edge cases":
+        return "medium", "subtle"
+    if mode == "hard mode":
+        return "hard", "adaptive"
+    return difficulty, personality
+
+
+def _build_replay_markdown(replay_events: list[dict[str, Any]]) -> str:
+    if not replay_events:
+        return "No replay events yet. Score some reviews to populate this panel."
+    lines = ["### 🔁 Replay Failure Cases"]
+    for i, ev in enumerate(replay_events[-8:], start=1):
+        verdict = str(ev.get("verdict", "UNKNOWN"))
+        reward = float(ev.get("reward", 0.0))
+        misses = int(ev.get("missing_stale_refs_count", 0))
+        malformed = int(ev.get("malformed_issues", 0))
+        epi = str(ev.get("episode_id", "n/a"))
+        lines.append(
+            f"{i}. `{epi}` | verdict={verdict} | reward={reward:+.2f} | missing={misses} | malformed={malformed}"
+        )
+    return "\n".join(lines)
+
+
+def new_episode(difficulty: str, personality: str, seed: str, scenario_mode: str, replay_events: list[dict[str, Any]] | None) -> tuple:
     try:
         s = int(seed)
     except ValueError:
         s = 42
     try:
-        env = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=s)
+        replay_events = replay_events or []
+        eff_difficulty, eff_personality = _scenario_overrides(scenario_mode, difficulty, personality)
+        env = CodeDriftEnv(difficulty=eff_difficulty, personality=eff_personality, seed=s)
         obs = env.reset()
         status = (
             f"### 🏁 Episode started: `{env.episode_id}`\n"
-            f"Ground truth stale refs: **{obs.n_stale_refs}** (Hidden from agent)"
+            f"Ground truth stale refs: **{obs.n_stale_refs}** (Hidden from agent)\n"
+            f"Mode: **{scenario_mode}** · Difficulty: **{eff_difficulty}** · Personality: **{eff_personality}**"
         )
         return (
             env,
             obs.prompt,
             obs.pr_diff,
             obs.codebase_context,
+            obs.test_output,
             "",
             status,
             _adversary_brain_html(env),
             _fmt_info({"note": "Submit a review to see scorer output.", "episode_id": env.episode_id}),
+            replay_events,
+            _build_replay_markdown(replay_events),
         )
     except Exception as e:
         err = {"error": str(e), "type": type(e).__name__}
@@ -126,97 +164,162 @@ def new_episode(difficulty: str, personality: str, seed: str) -> tuple:
             "",
             "",
             "",
+            "",
             f"### ❌ Failed to start episode: {e!s}",
             _adversary_brain_html(None),
             _fmt_info(err),
+            replay_events or [],
+            _build_replay_markdown(replay_events or []),
         )
 
 
-def submit_review(env: CodeDriftEnv | None, review: str) -> tuple:
+def submit_review(env: CodeDriftEnv | None, review: str, replay_events: list[dict[str, Any]] | None) -> tuple:
+    replay_events = replay_events or []
     if env is None:
         return (
-            None,
-            "",
-            "",
-            "",
-            "",
+            None, "", "", "", "", "",
             "### ⚠️ No active episode. Click **New episode** first.",
             _adversary_brain_html(None),
             _fmt_info({"error": "no_env"}),
+            replay_events,
+            _build_replay_markdown(replay_events),
         )
     if not review.strip():
         return (
-            env,
-            gr.update(),
-            gr.update(),
-            gr.update(),
-            gr.update(),
+            env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
             "### ⚠️ Paste a non-empty review.",
             _adversary_brain_html(env),
             _fmt_info({"error": "empty_review", "episode_id": env.episode_id}),
+            replay_events,
+            _build_replay_markdown(replay_events),
         )
     if not env.is_ready_for_step:
         return (
-            env,
-            gr.update(),
-            gr.update(),
-            gr.update(),
-            gr.update(),
+            env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
             "### ⚠️ Episode already scored.\nClick **New episode** to try again.",
             _adversary_brain_html(env),
-            _fmt_info(
-                {
-                    "error": "episode_already_scored",
-                    "hint": "One step per episode — use New episode for another try.",
-                }
-            ),
+            _fmt_info({"error": "episode_already_scored", "hint": "One step per episode — use New episode for another try."}),
+            replay_events,
+            _build_replay_markdown(replay_events),
         )
     try:
         _, reward, _done, info = env.step(review)
         status = _status_lines(reward, info)
         info["adversary_brain"] = env.drift_agent.adaptive_snapshot()
-        return env, gr.update(), gr.update(), gr.update(), "", status, _adversary_brain_html(env), _fmt_info(info)
+        replay_events.append(
+            {
+                "episode_id": info.get("episode_id"),
+                "reward": reward,
+                "verdict": info.get("verdict"),
+                "missing_stale_refs_count": info.get("missing_stale_refs_count", 0),
+                "malformed_issues": info.get("malformed_issues", 0),
+            }
+        )
+        return (
+            env, gr.update(), gr.update(), gr.update(), gr.update(), "",
+            status,
+            _adversary_brain_html(env),
+            _fmt_info(info),
+            replay_events,
+            _build_replay_markdown(replay_events),
+        )
     except RuntimeError as e:
         snap = env.debug_snapshot() if env is not None else {}
         err = {"error": str(e), "type": "RuntimeError", "env": snap, "hint": "One score per episode — click **New episode**."}
         return (
-            env,
-            gr.update(),
-            gr.update(),
-            gr.update(),
-            gr.update(),
+            env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
             "### ⚠️ This episode was already scored (or is not ready).\nClick **New episode** to continue.",
             _adversary_brain_html(env),
             _fmt_info(err),
+            replay_events,
+            _build_replay_markdown(replay_events),
         )
     except Exception as e:
         snap = env.debug_snapshot() if env is not None else {}
         err = {"error": str(e), "type": type(e).__name__, "env": snap}
         return (
-            env,
-            gr.update(),
-            gr.update(),
-            gr.update(),
-            gr.update(),
+            env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
             f"### ❌ Scoring failed: {e!s}",
             _adversary_brain_html(env),
             _fmt_info(err),
+            replay_events,
+            _build_replay_markdown(replay_events),
         )
 
+
+def run_benchmark(
+    n_episodes: int,
+    difficulty: str,
+    personality: str,
+    seed: str,
+    scenario_mode: str,
+) -> tuple[str, str]:
+    try:
+        base_seed = int(seed)
+    except ValueError:
+        base_seed = 42
+    n = max(1, min(50, int(n_episodes)))
+    eff_difficulty, eff_personality = _scenario_overrides(scenario_mode, difficulty, personality)
+    rows: list[dict[str, Any]] = []
+    for i in range(n):
+        s = base_seed + i
+        env_base = CodeDriftEnv(difficulty=eff_difficulty, personality=eff_personality, seed=s)
+        env_base.reset()
+        _, base_reward, _, base_info = env_base.step(BASE_MODEL_RESPONSE)
+
+        env_trained = CodeDriftEnv(difficulty=eff_difficulty, personality=eff_personality, seed=s)
+        env_trained.reset()
+        _, trained_reward, _, trained_info = env_trained.step(TRAINED_MODEL_RESPONSE)
+
+        rows.append(
+            {
+                "seed": s,
+                "base_reward": base_reward,
+                "trained_reward": trained_reward,
+                "base_verdict": base_info.get("verdict"),
+                "trained_verdict": trained_info.get("verdict"),
+                "base_recall": float(base_info.get("recall", 0.0)),
+                "trained_recall": float(trained_info.get("recall", 0.0)),
+                "episode_id": trained_info.get("episode_id"),
+            }
+        )
+
+    base_avg = sum(r["base_reward"] for r in rows) / len(rows)
+    trained_avg = sum(r["trained_reward"] for r in rows) / len(rows)
+    win_count = sum(1 for r in rows if r["trained_reward"] > r["base_reward"])
+    tie_count = sum(1 for r in rows if r["trained_reward"] == r["base_reward"])
+    trained_recall_avg = sum(r["trained_recall"] for r in rows) / len(rows)
+    base_recall_avg = sum(r["base_recall"] for r in rows) / len(rows)
+    summary = (
+        f"### 🚀 Benchmark complete ({len(rows)} episodes)\n"
+        f"Mode: **{scenario_mode}** · Difficulty: **{eff_difficulty}** · Personality: **{eff_personality}**\n\n"
+        f"- Base Avg Reward: **{base_avg:+.3f}**\n"
+        f"- Trained Avg Reward: **{trained_avg:+.3f}**\n"
+        f"- Win Rate (Trained > Base): **{(win_count / len(rows)):.0%}**\n"
+        f"- Ties: **{tie_count}**\n"
+        f"- Base Avg Recall: **{base_recall_avg:.2f}**\n"
+        f"- Trained Avg Recall: **{trained_recall_avg:.2f}**"
+    )
+    return summary, _fmt_info({"benchmark": rows})
+
+
+_NEW_EP_OUTPUTS_COUNT = 11   # env, prompt, pr_diff, codebase, test_output, review, status, brain, scorer, replay_state, replay_out
+_STEP_OUTPUTS_COUNT    = 11   # same shape
 
 with gr.Blocks(title="CodeDrift Arena") as demo:
     gr.Markdown(
         "# 🏟️ CodeDrift Arena\n"
-        "**The Challenge:** Today's codebase has changed, but the PR still assumes yesterday's schema. "
-        "The reviewer must catch these 'stale' references before they ship and break production.\n\n"
+        "**The Challenge:** The codebase has drifted — functions renamed, files deleted, APIs changed. "
+        "Tests are failing. The reviewer must trace the failure cascade to its root cause.\n\n"
         "**Judge Path:**\n"
-        "1. Click **New episode** to generate a drifted codebase + PR.\n"
-        "2. Click **▶ Load Base Model** to see how a naive model fails (ships bugs).\n"
-        "3. Click **▶ Load Trained Model** to see how our GRPO-trained policy catches it.\n"
-        "4. Click **⚖️ Score review** to see the deterministic reward."
+        "1. Click **New episode** — see test failures + PR diff.\n"
+        "2. Click **▶ Base Model** — naive model misses the root cause (ships the bug).\n"
+        "3. Click **▶ Trained Model** — GRPO-trained policy traces failure → root cause correctly.\n"
+        "4. Click **⚖️ Score** to see the causal reward breakdown."
     )
 
     env_state = gr.State(None)
+    replay_state = gr.State([])
 
     with gr.Row():
         with gr.Column(scale=1):
@@ -231,57 +334,88 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
                     value="random",
                     label="Drift personality",
                 )
+            scenario_mode = gr.Dropdown(
+                choices=["Random", "Edge Cases", "Hard Mode"],
+                value="Random",
+                label="Test mode",
+            )
             seed = gr.Textbox(value="42", label="Seed", max_lines=1)
             btn_new = gr.Button("🔄 New episode", variant="primary")
-        
+            benchmark_n = gr.Slider(minimum=3, maximum=30, value=10, step=1, label="Benchmark episodes")
+            btn_benchmark = gr.Button("🚀 Run Benchmark", variant="secondary")
+
         with gr.Column(scale=2):
             status = gr.Markdown("### Click **New episode** to start.")
 
     with gr.Row():
         with gr.Column():
+            test_output_box = gr.Textbox(
+                label="🔴 Test Execution Output (Execution Engine)",
+                lines=8,
+                max_lines=14,
+                interactive=False,
+                elem_id="test_output_box",
+            )
             pr_diff = gr.Textbox(
-                label="PR Diff (Review Target)",
-                lines=12,
-                max_lines=20,
+                label="PR Diff (Merged Code — find the cause)",
+                lines=10,
+                max_lines=18,
                 interactive=False,
                 elem_id="pr_diff_box",
             )
-            codebase = gr.Textbox(label="Current Codebase State (Reality)", lines=12)
-            prompt = gr.Textbox(label="Full Model Prompt (Context)", lines=5, max_lines=10)
-        
+            codebase = gr.Textbox(label="Current Codebase State (Ground Truth)", lines=10)
+            prompt = gr.Textbox(label="Full Model Prompt", lines=4, max_lines=8)
+
         with gr.Column():
             brain_panel = gr.HTML(label="Adversary Brain")
             review = gr.Textbox(
-                label="Reviewer Response (ISSUES: must cite stale refs)",
+                label="Reviewer Response",
                 lines=10,
-                placeholder="VERDICT: REQUEST_CHANGES\nISSUES: ...\nREASON: ...",
+                placeholder=(
+                    "VERDICT: REQUEST_CHANGES\n"
+                    "ROOT_CAUSE: <exact stale reference>\n"
+                    "FAILURE_PATH: test_name → caller → broken_ref\n"
+                    "CONFIDENCE: 0.9\n"
+                    "ISSUES: ...\n"
+                    "REASON: ..."
+                ),
             )
             with gr.Row():
-                btn_base = gr.Button("▶ Load Base Model (Fails)", variant="secondary")
-                btn_trained = gr.Button("▶ Load Trained Model (Success)", variant="secondary")
-            
+                btn_base = gr.Button("▶ Base Model (Fails)", variant="secondary")
+                btn_trained = gr.Button("▶ Trained Model (Wins)", variant="secondary")
+
             btn_submit = gr.Button("⚖️ Score review", variant="primary")
-            scorer_out = gr.Textbox(label="Metric Breakdown (JSON)", lines=12, max_lines=20, interactive=False)
+            scorer_out = gr.Textbox(label="Causal Reward Breakdown (JSON)", lines=12, max_lines=20, interactive=False)
+            replay_out = gr.Markdown("No replay events yet. Score some reviews to populate this panel.")
+
+    _new_ep_outputs = [env_state, prompt, pr_diff, codebase, test_output_box, review, status, brain_panel, scorer_out, replay_state, replay_out]
+    _step_outputs   = [env_state, prompt, pr_diff, codebase, test_output_box, review, status, brain_panel, scorer_out, replay_state, replay_out]
 
     btn_base.click(lambda: BASE_MODEL_RESPONSE, outputs=[review])
     btn_trained.click(lambda: TRAINED_MODEL_RESPONSE, outputs=[review])
 
     btn_new.click(
         new_episode,
-        inputs=[difficulty, personality, seed],
-        outputs=[env_state, prompt, pr_diff, codebase, review, status, brain_panel, scorer_out],
+        inputs=[difficulty, personality, seed, scenario_mode, replay_state],
+        outputs=_new_ep_outputs,
     )
 
     btn_submit.click(
         submit_review,
-        inputs=[env_state, review],
-        outputs=[env_state, prompt, pr_diff, codebase, review, status, brain_panel, scorer_out],
+        inputs=[env_state, review, replay_state],
+        outputs=_step_outputs,
+    )
+
+    btn_benchmark.click(
+        run_benchmark,
+        inputs=[benchmark_n, difficulty, personality, seed, scenario_mode],
+        outputs=[status, scorer_out],
     )
 
     demo.load(
         new_episode,
-        inputs=[difficulty, personality, seed],
-        outputs=[env_state, prompt, pr_diff, codebase, review, status, brain_panel, scorer_out],
+        inputs=[difficulty, personality, seed, scenario_mode, replay_state],
+        outputs=_new_ep_outputs,
     )
 
 if __name__ == "__main__":

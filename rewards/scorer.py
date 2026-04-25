@@ -17,8 +17,12 @@ grounding keeps full catch reward.
 from __future__ import annotations
 
 import re
+from typing import TYPE_CHECKING
 
 from agents.drift_agent import API_CONTRACT_CHANGES, FUNCTION_RENAMES, REMOVABLE_FILES, DriftAction
+
+if TYPE_CHECKING:
+    from env.failure_cascade import FailureCascade
 
 
 def verdict_emoji(info: dict, reward: float) -> str:
@@ -239,6 +243,10 @@ class RewardScorer:
     R_PARTIAL_CREDIT = 0.4
     R_SPURIOUS_STALE_MENTION = -0.25
     R_UNGROUNDED_CATCH_SCALE = 0.7
+    # Causal reasoning bonuses — additive on top of base catch reward
+    R_ROOT_CAUSE_CORRECT = 0.5
+    R_FAILURE_PATH_CREDIT = 0.25
+    R_CONFIDENCE_CALIBRATED = 0.1
 
     @staticmethod
     def _parse_issues_section(response: str) -> str | None:
@@ -252,11 +260,44 @@ class RewardScorer:
             return None
         return _normalize_issues_text(m.group(1))
 
+    @staticmethod
+    def _parse_root_cause(response: str) -> str | None:
+        m = re.search(
+            r"ROOT_CAUSE\s*:\s*(.+?)(?:\n|FAILURE_PATH|CONFIDENCE|ISSUES|REASON|\Z)",
+            response,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not m:
+            return None
+        return _normalize_issues_text(m.group(1))
+
+    @staticmethod
+    def _parse_failure_path(response: str) -> str | None:
+        m = re.search(
+            r"FAILURE_PATH\s*:\s*(.+?)(?:\n|CONFIDENCE|ISSUES|REASON|\Z)",
+            response,
+            re.IGNORECASE | re.DOTALL,
+        )
+        if not m:
+            return None
+        return _normalize_issues_text(m.group(1))
+
+    @staticmethod
+    def _parse_confidence(response: str) -> float | None:
+        m = re.search(r"CONFIDENCE\s*:\s*([0-9]*\.?[0-9]+)", response, re.IGNORECASE)
+        if not m:
+            return None
+        try:
+            return max(0.0, min(1.0, float(m.group(1))))
+        except ValueError:
+            return None
+
     def score(
         self,
         agent_response: str,
         actions: list[DriftAction],
         pr_diff: str,
+        failure_cascade: "FailureCascade | None" = None,
     ) -> tuple[float, dict]:
         """
         Returns (total_reward, info_dict).
@@ -380,11 +421,77 @@ class RewardScorer:
         info["diff_grounded_count"] = ng
         info["diff_grounding_fraction"] = ng / max(1, n)
 
+        # ── Causal reasoning bonus (additive, does not affect base recall) ─────
+        causal_bonus = 0.0
+        causal_info: dict = {}
+
+        root_cause_text = self._parse_root_cause(agent_response)
+        failure_path_text = self._parse_failure_path(agent_response)
+        confidence_val = self._parse_confidence(agent_response)
+
+        causal_info["has_root_cause"] = root_cause_text is not None
+        causal_info["has_failure_path"] = failure_path_text is not None
+        causal_info["confidence_given"] = confidence_val
+
+        stale_ids = {a.stale_ref.split("(")[0].lower() for a in actions}
+        # Also include module names for removal actions
+        for a in actions:
+            if a.drift_type == "removal":
+                mod = (a.metadata.get("module") or "").lower()
+                if mod:
+                    stale_ids.add(mod)
+
+        if root_cause_text:
+            root_cause_correct = any(
+                _identifier_mentioned(root_cause_text, sid) for sid in stale_ids
+            )
+            causal_info["root_cause_correct"] = root_cause_correct
+            if root_cause_correct:
+                causal_bonus += self.R_ROOT_CAUSE_CORRECT
+        else:
+            causal_info["root_cause_correct"] = False
+
+        if failure_path_text:
+            path_has_stale = any(_identifier_mentioned(failure_path_text, sid) for sid in stale_ids)
+            path_has_arrow = "→" in failure_path_text or "->" in failure_path_text
+            # Also accept path tokens from failure cascade if available
+            if failure_cascade is not None:
+                cascade_tokens = [t.lower() for t in failure_cascade.all_path_tokens()]
+                path_has_chain = sum(
+                    1 for tok in cascade_tokens if tok in failure_path_text
+                ) >= 2
+            else:
+                path_has_chain = path_has_stale and path_has_arrow
+            causal_info["failure_path_credit"] = path_has_chain
+            if path_has_chain:
+                causal_bonus += self.R_FAILURE_PATH_CREDIT
+        else:
+            causal_info["failure_path_credit"] = False
+
+        if confidence_val is not None:
+            reviewer_correct = info.get("episode_outcome") == "perfect"
+            calibrated = (reviewer_correct and confidence_val >= 0.5) or (
+                not reviewer_correct and confidence_val <= 0.6
+            )
+            causal_info["confidence_calibrated"] = calibrated
+            if calibrated:
+                causal_bonus += self.R_CONFIDENCE_CALIBRATED
+        else:
+            causal_info["confidence_calibrated"] = False
+
+        if causal_bonus > 0:
+            total += causal_bonus
+            info["breakdown"]["causal_bonus"] = causal_bonus
+        info["causal_reasoning"] = causal_info
+        # ── End causal bonus ──────────────────────────────────────────────────
+
         mal = "yes" if info["malformed_issues"] else "no"
         verb = f" | verbosity_pen={info['breakdown'].get('verbosity_penalty', 0):+.2f}" if vpen else ""
+        causal_str = f" | causal={causal_bonus:+.2f}" if causal_bonus else ""
         info["metric_strip"] = (
             f"reward={total:+.2f} | recall={info['recall']:.0%} | verdict={verdict} | "
-            f"malformed_issues={mal} | grounded_in_diff={ng}/{n} | spurious={len(info['spurious_mentions'])}{verb}"
+            f"malformed_issues={mal} | grounded_in_diff={ng}/{n} | spurious={len(info['spurious_mentions'])}"
+            f"{verb}{causal_str}"
         )
         info["judge_emoji"] = verdict_emoji(info, total)
         info["judge_summary"] = judge_summary_line(info, total)
@@ -399,8 +506,56 @@ class RewardScorer:
         Whether ISSUES text evidences the *stale* artifact.
         ``issues_norm`` is empty when ISSUES: could not be parsed — no mentions.
         """
+        pat = action.bug_pattern or action.drift_type
         stale_bare = action.stale_ref.split("(")[0].lower()
 
+        # ── New realistic patterns ────────────────────────────────────────────
+        if pat == "partial_rename":
+            # Must mention the stale function name (same as rename)
+            return _identifier_mentioned(issues_norm, stale_bare)
+
+        if pat == "null_missing":
+            fn = (action.metadata.get("function") or stale_bare).lower()
+            attr = (action.metadata.get("nullable_attribute") or "").lower()
+            fn_mentioned = _identifier_mentioned(issues_norm, fn)
+            null_mentioned = any(tok in issues_norm for tok in ("none", "null", "nonetype", "optional"))
+            return fn_mentioned and (null_mentioned or (attr and attr in issues_norm))
+
+        if pat == "type_mismatch":
+            fn = (action.metadata.get("function") or stale_bare).lower()
+            param = (action.metadata.get("param") or "").lower()
+            old_type = (action.metadata.get("old_type") or "").lower()
+            new_type = (action.metadata.get("new_type") or "").lower()
+            fn_mentioned = _identifier_mentioned(issues_norm, fn)
+            type_context = (
+                (param and _param_token_in_issues(issues_norm, param))
+                or (old_type and old_type in issues_norm)
+                or (new_type and new_type in issues_norm)
+                or "type" in issues_norm
+            )
+            return fn_mentioned and type_context
+
+        if pat == "condition_flip":
+            fn = (action.metadata.get("function") or stale_bare).lower()
+            param = (action.metadata.get("param") or "").lower()
+            fn_mentioned = _identifier_mentioned(issues_norm, fn)
+            flag_context = (
+                (param and _param_token_in_issues(issues_norm, param))
+                or any(tok in issues_norm for tok in ("invert", "flip", "semantic", "wrong value", "boolean", "flag"))
+            )
+            return fn_mentioned and flag_context
+
+        if pat == "off_by_one":
+            fn = (action.metadata.get("function") or stale_bare).lower()
+            param = (action.metadata.get("param") or "").lower()
+            fn_mentioned = _identifier_mentioned(issues_norm, fn)
+            offset_context = (
+                (param and _param_token_in_issues(issues_norm, param))
+                or any(tok in issues_norm for tok in ("0-based", "1-based", "index", "offset", "off by one", "page"))
+            )
+            return fn_mentioned and offset_context
+
+        # ── Legacy patterns ───────────────────────────────────────────────────
         if action.drift_type == "removal":
             module = (action.metadata.get("module") or "").lower()
             return stale_bare in issues_norm or (module and module in issues_norm)
@@ -438,7 +593,8 @@ class RewardScorer:
 
     def _stale_key(self, action: DriftAction) -> str:
         bare = action.stale_ref.split("(")[0]
-        return f"{action.drift_type}:{bare}"
+        label = action.bug_pattern or action.drift_type
+        return f"{label}:{bare}"
 
     def _expected_episode_mentions(self, actions: list[DriftAction]) -> set[str]:
         """

@@ -33,6 +33,7 @@ def _serialize_actions(actions) -> list[dict]:
             "stale_ref": a.stale_ref,
             "current_ref": a.current_ref,
             "metadata": a.metadata,
+            "bug_pattern": getattr(a, "bug_pattern", ""),
         }
         for a in actions
     ]
@@ -146,6 +147,7 @@ def make_reward_fn(difficulty: str):
                         stale_ref=d["stale_ref"],
                         current_ref=d["current_ref"],
                         metadata=d.get("metadata") or {},
+                        bug_pattern=d.get("bug_pattern") or "",
                     )
                     for d in action_dicts
                 ]

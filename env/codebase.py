@@ -4,7 +4,7 @@ Codebase state — shared data model used by env, drift agent, and reward scorer
 
 import copy
 from dataclasses import dataclass, field
-from typing import Dict, List
+from typing import Dict, List, Set
 
 
 @dataclass
@@ -19,6 +19,9 @@ class CodebaseState:
     files: List[str] = field(default_factory=list)  # available file paths
     api_signatures: Dict[str, List[str]] = field(default_factory=dict)  # fn name -> param list
     version: int = 0  # bumped on each drift
+    # Extended state for richer bug patterns (backward-compatible: defaults are empty)
+    param_types: Dict[str, Dict[str, str]] = field(default_factory=dict)  # fn -> {param -> type}
+    nullable_returns: Set[str] = field(default_factory=set)  # fns that now return Optional
 
     def clone(self) -> "CodebaseState":
         return copy.deepcopy(self)
@@ -50,6 +53,9 @@ def build_base_codebase() -> CodebaseState:
         "checkPermission": "userId: str, resource: str",
         "logEvent": "event: str, metadata: dict",
         "refreshToken": "token: str",
+        # Added to support off_by_one patterns
+        "getLogEntry": "line_number: int",
+        "getPageItems": "page: int, limit: int = 20",
     }
     state.files = [
         "utils/helpers.py",
@@ -72,4 +78,15 @@ def build_base_codebase() -> CodebaseState:
         "fetchUserData": ["userId"],
         "submitOrder": ["item", "qty", "userId"],
     }
+    state.param_types = {
+        "createOrder":      {"userId": "int", "item": "str", "qty": "int"},
+        "deleteRecord":     {"recordId": "int"},
+        "sendNotification": {"userId": "int", "message": "str"},
+        "checkPermission":  {"userId": "int", "resource": "str"},
+        "getUserData":      {"userId": "str"},
+        "authenticate":     {"username": "str", "password": "str"},
+        "loadConfig":       {"env": "str"},
+        "validateInput":    {"data": "dict"},
+    }
+    # nullable_returns starts empty — mutations add functions to it
     return state
