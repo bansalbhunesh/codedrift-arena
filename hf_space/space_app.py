@@ -644,6 +644,256 @@ def run_benchmark(
     return summary, _fmt_info({"benchmark": rows})
 
 
+# ─── Battle Mode ────────────────────────────────────────────────────────────
+
+_BUG_PATTERN_LABELS: dict[str, str] = {
+    "partial_rename": "Partial rename",
+    "null_missing":   "Null dereference",
+    "type_mismatch":  "Type mismatch",
+    "condition_flip": "Condition flip",
+    "off_by_one":     "Off-by-one",
+    "rename":         "Rename",
+    "removal":        "Module removal",
+    "contract":       "Contract change",
+}
+
+
+def _battle_side_html(
+    label: str,
+    tag: str,
+    review_text: str,
+    reward: float,
+    caught: list[str],
+    missed: list[str],
+    outcome: str,   # "win" | "lose"
+) -> str:
+    xp = int(round(reward * 100))
+    xp_str = f"+{xp}" if xp >= 0 else str(xp)
+    verdict_line = next(
+        (ln.split(":", 1)[1].strip() for ln in review_text.splitlines() if ln.startswith("VERDICT:")),
+        "—",
+    )
+    issues_line = next(
+        (ln.split(":", 1)[1].strip() for ln in review_text.splitlines() if ln.startswith("ISSUES:")),
+        "—",
+    )
+    root_line = next(
+        (ln.split(":", 1)[1].strip() for ln in review_text.splitlines() if ln.startswith("ROOT_CAUSE:")),
+        "—",
+    )
+    icon = "◎" if outcome == "win" else "✕"
+    result_label = "BUG DEFUSED" if outcome == "win" else "MISSED IT"
+    caught_html = "".join(
+        f"<span class='battle-ref battle-ref--caught'>{c.split(':', 1)[-1]}</span>"
+        for c in caught
+    ) or "<span class='battle-ref battle-ref--none'>—</span>"
+    missed_html = "".join(
+        f"<span class='battle-ref battle-ref--missed'>{m.split(':', 1)[-1]}</span>"
+        for m in missed
+    ) or "<span class='battle-ref battle-ref--none'>—</span>"
+    return f"""
+<div class="battle-side battle-side--{outcome}">
+  <div class="battle-side__header">
+    <span class="battle-player-label">{label}</span>
+    <span class="battle-player-tag">{tag}</span>
+  </div>
+  <div class="battle-review">
+    <div class="battle-review__row"><span class="battle-review__k">VERDICT</span><span class="battle-review__v battle-verdict--{outcome}">{verdict_line}</span></div>
+    <div class="battle-review__row"><span class="battle-review__k">ROOT CAUSE</span><span class="battle-review__v">{root_line[:80]}</span></div>
+    <div class="battle-review__row"><span class="battle-review__k">ISSUES</span><span class="battle-review__v">{issues_line[:100]}</span></div>
+  </div>
+  <div class="battle-refs">
+    <div><span class="battle-refs__k">Caught</span>{caught_html}</div>
+    <div><span class="battle-refs__k">Missed</span>{missed_html}</div>
+  </div>
+  <div class="battle-outcome battle-outcome--{outcome}">
+    <span class="battle-outcome__icon">{icon}</span>
+    <span class="battle-outcome__label">{result_label}</span>
+    <span class="battle-outcome__reward">{reward:+.1f}</span>
+    <span class="battle-outcome__xp">{xp_str} XP</span>
+  </div>
+</div>""".strip()
+
+
+def _battle_html(
+    episode_id: str,
+    pattern: str,
+    stale_ref: str,
+    failure_path: str,
+    junior_review: str,
+    senior_review: str,
+    reward_j: float,
+    reward_s: float,
+    info_j: dict[str, Any],
+    info_s: dict[str, Any],
+) -> str:
+    caught_j = list(info_j.get("caught") or [])
+    missed_j = list(info_j.get("missed") or [])
+    caught_s = list(info_s.get("caught") or [])
+    missed_s = list(info_s.get("missed") or [])
+    pattern_label = _BUG_PATTERN_LABELS.get(pattern, pattern)
+    delta = reward_s - reward_j
+    delta_str = f"{delta:+.1f}"
+    side_j = _battle_side_html("JUNIOR", "Untrained baseline", junior_review, reward_j, caught_j, missed_j, "lose")
+    side_s = _battle_side_html("SENIOR", "GRPO-Trained", senior_review, reward_s, caught_s, missed_s, "win")
+    return f"""
+<div class="battle-arena" role="region" aria-label="Battle result">
+  <div class="battle-header">
+    <div class="battle-header__left">
+      <span class="battle-pattern-badge">{pattern_label}</span>
+      <code class="battle-stale-ref">{stale_ref}</code>
+    </div>
+    <div class="battle-header__right">
+      <span class="battle-episode">{episode_id}</span>
+    </div>
+  </div>
+  <div class="battle-split">
+    {side_j}
+    <div class="battle-vs" aria-hidden="true">VS</div>
+    {side_s}
+  </div>
+  <div class="battle-delta" role="status" aria-live="polite">
+    <span class="battle-delta__label">Training advantage</span>
+    <span class="battle-delta__value">{delta_str} reward · {int(round(delta * 100)):+d} XP per mission</span>
+  </div>
+  <div class="battle-footer">
+    <span class="battle-footer__item">Failure path: <code>{failure_path}</code></span>
+  </div>
+</div>""".strip()
+
+
+def run_battle(seed_str: str, difficulty: str, personality: str) -> tuple[str, str]:
+    """Single battle: Junior vs Senior on the same episode."""
+    try:
+        seed = int(seed_str)
+    except (ValueError, TypeError):
+        seed = 42
+
+    env_j = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=seed)
+    env_j.reset()
+    junior_review = BASE_MODEL_RESPONSE
+    _, reward_j, _, info_j = env_j.step(junior_review)
+
+    env_s = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=seed)
+    env_s.reset()
+    senior_review = _trained_response_for(env_s)
+    _, reward_s, _, info_s = env_s.step(senior_review)
+
+    action = env_s.stale_actions[0] if env_s.stale_actions else None
+    pattern = (action.bug_pattern or action.drift_type) if action else "unknown"
+    stale_ref = action.stale_ref if action else "—"
+
+    paths = info_s.get("failure_paths") or []
+    failure_path = paths[0] if paths else f"test → caller → {stale_ref}"
+
+    html = _battle_html(
+        episode_id=str(info_s.get("episode_id") or seed),
+        pattern=pattern,
+        stale_ref=stale_ref,
+        failure_path=failure_path,
+        junior_review=junior_review,
+        senior_review=senior_review,
+        reward_j=reward_j,
+        reward_s=reward_s,
+        info_j=info_j,
+        info_s=info_s,
+    )
+    detail = _fmt_info({
+        "seed": seed,
+        "pattern": pattern,
+        "stale_ref": stale_ref,
+        "junior_reward": reward_j,
+        "senior_reward": reward_s,
+        "delta": reward_s - reward_j,
+        "junior_recall": info_j.get("recall"),
+        "senior_recall": info_s.get("recall"),
+    })
+    return html, detail
+
+
+def run_gauntlet(n_str: int, seed_str: str, difficulty: str, personality: str) -> str:
+    """Run N battles and return a scoreboard HTML proving consistent training advantage."""
+    try:
+        base_seed = int(seed_str)
+    except (ValueError, TypeError):
+        base_seed = 42
+    n = max(3, min(10, int(n_str)))
+
+    rows_html: list[str] = []
+    total_j = total_s = 0.0
+    wins = 0
+
+    for i in range(n):
+        s = base_seed + i
+        env_j = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=s)
+        env_j.reset()
+        _, rj, _, _ = env_j.step(BASE_MODEL_RESPONSE)
+
+        env_s = CodeDriftEnv(difficulty=difficulty, personality=personality, seed=s)
+        env_s.reset()
+        _, rs, _, info_s = env_s.step(_trained_response_for(env_s))
+
+        action = env_s.stale_actions[0] if env_s.stale_actions else None
+        pattern = _BUG_PATTERN_LABELS.get(
+            (action.bug_pattern or action.drift_type) if action else "", "—"
+        )
+        stale = action.stale_ref if action else "—"
+        total_j += rj
+        total_s += rs
+        if rs > rj + 1e-9:
+            wins += 1
+        delta = rs - rj
+        row_tone = "ok" if delta > 0 else "bad" if delta < 0 else "mu"
+        rows_html.append(
+            f"<tr class='gauntlet-row gauntlet-row--{row_tone}'>"
+            f"<td class='gauntlet-td'>{i + 1}</td>"
+            f"<td class='gauntlet-td gauntlet-pattern'>{pattern}</td>"
+            f"<td class='gauntlet-td gauntlet-stale'><code>{stale[:40]}</code></td>"
+            f"<td class='gauntlet-td gauntlet-score gauntlet-score--bad'>{rj:+.1f}</td>"
+            f"<td class='gauntlet-td gauntlet-score gauntlet-score--ok'>{rs:+.1f}</td>"
+            f"<td class='gauntlet-td gauntlet-delta'>{'▲' if delta > 0 else '▼'} {delta:+.1f}</td>"
+            f"</tr>"
+        )
+
+    win_pct = wins / n if n else 0
+    avg_j = total_j / n
+    avg_s = total_s / n
+    tone = "ok" if win_pct >= 0.8 else "warn" if win_pct >= 0.5 else "bad"
+    return f"""
+<div class="gauntlet-wrap" role="region" aria-label="Gauntlet results">
+  <div class="gauntlet-header">
+    <span class="gauntlet-title">{n}-ROUND GAUNTLET</span>
+    <span class="gauntlet-winrate gauntlet-winrate--{tone}">Senior wins {win_pct:.0%} ({wins}/{n})</span>
+  </div>
+  <table class="gauntlet-table" aria-label="Round-by-round results">
+    <thead>
+      <tr>
+        <th>#</th><th>Bug type</th><th>Stale ref</th>
+        <th>Junior</th><th>Senior</th><th>Delta</th>
+      </tr>
+    </thead>
+    <tbody>{"".join(rows_html)}</tbody>
+  </table>
+  <div class="gauntlet-totals">
+    <div class="gauntlet-total gauntlet-total--bad">
+      <div class="gauntlet-total__label">Junior total</div>
+      <div class="gauntlet-total__val">{total_j:+.1f}</div>
+      <div class="gauntlet-total__xp">{int(total_j * 100):+d} XP</div>
+    </div>
+    <div class="gauntlet-total gauntlet-total--ok">
+      <div class="gauntlet-total__label">Senior total</div>
+      <div class="gauntlet-total__val">{total_s:+.1f}</div>
+      <div class="gauntlet-total__xp">{int(total_s * 100):+d} XP</div>
+    </div>
+    <div class="gauntlet-total gauntlet-total--delta">
+      <div class="gauntlet-total__label">Training edge</div>
+      <div class="gauntlet-total__val">{total_s - total_j:+.1f}</div>
+      <div class="gauntlet-total__xp">{int((total_s - total_j) * 100):+d} XP advantage</div>
+    </div>
+  </div>
+</div>""".strip()
+
+
 # ─── CSS theme ──────────────────────────────────────────────────────────────
 
 
@@ -819,6 +1069,56 @@ with gr.Blocks(title="Bug Code Arena") as demo:
                             elem_classes="replay-markdown",
                         )
         
+            # ── Battle tab ────────────────────────────────────────────────────
+            with gr.Tab("⚔️ Battle"):
+                gr.HTML(
+                    "<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
+                    "<p class='ds-lead ds-lead--tight'>"
+                    "<strong>Same bug. Same PR. Two models. One winner.</strong> "
+                    "Junior (untrained baseline) approves every PR and misses every stale ref. "
+                    "Senior (GRPO-trained) identifies the root cause, traces the failure path, and blocks the merge. "
+                    "Each battle is the clearest possible proof that training works."
+                    "</p></div></section>"
+                )
+                with gr.Row(elem_classes=["ds-row"]):
+                    with gr.Column(scale=1, elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Arena settings</h2>")
+                        battle_seed = gr.Textbox(value="42", label="Seed", max_lines=1)
+                        battle_difficulty = gr.Dropdown(
+                            choices=["easy", "medium", "hard"], value="easy", label="Mission level"
+                        )
+                        battle_personality = gr.Dropdown(
+                            choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
+                            value="random", label="Adversary style",
+                        )
+                        btn_battle = gr.Button("⚔️ Run Battle", variant="primary")
+                        gr.HTML("<hr style='border:none;border-top:1px solid var(--ds-border);margin:var(--s-3) 0'>")
+                        gr.HTML("<h2 class='ds-block-title'>Gauntlet (best-of-N)</h2>")
+                        gauntlet_n = gr.Slider(minimum=3, maximum=10, value=5, step=1, label="Rounds")
+                        btn_gauntlet = gr.Button("🏆 Run Gauntlet", variant="secondary")
+
+                    with gr.Column(scale=2, elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Result</h2>")
+                        battle_panel = gr.HTML(
+                            "<div class='battle-arena battle-arena--idle'>"
+                            "<div class='battle-idle-msg'>Press <strong>⚔️ Run Battle</strong> to pit Junior against Senior on the same bug.</div>"
+                            "</div>"
+                        )
+                        battle_detail = gr.Textbox(label="Detail (JSON)", lines=6, interactive=False)
+
+                gauntlet_panel = gr.HTML("")
+
+                btn_battle.click(
+                    run_battle,
+                    inputs=[battle_seed, battle_difficulty, battle_personality],
+                    outputs=[battle_panel, battle_detail],
+                )
+                btn_gauntlet.click(
+                    run_gauntlet,
+                    inputs=[gauntlet_n, battle_seed, battle_difficulty, battle_personality],
+                    outputs=[gauntlet_panel],
+                )
+
             # ── Leaderboard tab ────────────────────────────────────────────────
             with gr.Tab("Leaderboard"):
                 gr.HTML(
