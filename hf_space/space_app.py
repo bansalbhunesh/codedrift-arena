@@ -666,30 +666,35 @@ _STEP_OUTPUTS_COUNT   = 13
 
 # ─── UI ─────────────────────────────────────────────────────────────────────
 
-_BLOCKS_KWARGS: dict[str, Any] = {
-    "title": "CodeDrift Arena",
-    # Keep css/theme on Blocks so Hugging Face Spaces (which imports `demo`
-    # instead of running __main__) always receives the styling.
-    "theme": gr.themes.Base(),
-    "css": _SPACE_CSS,
-}
+# Gradio 6 moved css/theme out of Blocks() — they must go to launch() or be
+# injected via gr.HTML so HuggingFace Spaces (which calls launch() itself)
+# always receives the styling.
 
-with gr.Blocks(**_BLOCKS_KWARGS) as demo:
+with gr.Blocks(title="Bug Code Arena") as demo:
+
+    # Inject design-system CSS as an HTML component — works in every Gradio 6
+    # context including HF Spaces where the host controls launch().
+    gr.HTML(f"<style>\n{_SPACE_CSS}\n</style>")
 
     with gr.Column(elem_classes=["ds-app"]):
 
         # ── Top HUD ────────────────────────────────────────────────────────────
         gr.HTML(
             "<header class='ds-app-header'>"
-            "<h1 class='ds-h1'>CodeDrift Arena</h1>"
-            "<p class='ds-subtitle'>Train and evaluate review agents on adversarial code drift: "
-            "stale references ship in a PR, tests fail, and the model must trace the bug before merge.</p>"
+            "<div class='arena-title-row'>"
+            "<h1 class='ds-h1 arena-title'>🐛 Bug Code Arena</h1>"
+            "<span class='arena-tagline'>by CodeDrift</span>"
+            "</div>"
+            "<p class='ds-subtitle'>An adversarial RL environment where an AI agent learns to catch "
+            "stale references in code reviews — before they reach production. "
+            "Junior model ships bugs. Senior model (GRPO-trained) catches them.</p>"
             "<ul class='ds-badges' aria-label='Stack'>"
-            "<li>OpenEnv</li><li>GRPO</li><li>Live demo</li>"
+            "<li>OpenEnv</li><li>GRPO</li><li>RL Training</li><li>Live Demo</li>"
             "</ul>"
             "<div class='ds-signal-row' aria-label='Session'>"
-            "<span class='ds-signal ds-signal--accent'>Live</span>"
+            "<span class='ds-signal ds-signal--accent'>● LIVE</span>"
             "<span class='ds-signal'>Hugging Face Space</span>"
+            "<span class='ds-signal'>Gradio 6</span>"
             "</div>"
             "</header>"
         )
@@ -1116,4 +1121,4 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
 
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(theme=gr.themes.Base())

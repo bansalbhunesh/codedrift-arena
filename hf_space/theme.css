@@ -473,3 +473,72 @@
 @media (prefers-reduced-motion: reduce) {
   .ds-xpbar-fill { transition: none; }
 }
+
+/* ——— Bug Code Arena branding ——— */
+.arena-title-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-3);
+  flex-wrap: wrap;
+}
+.arena-title {
+  font-size: clamp(1.6rem, 1.2rem + 1.5vw, 2.2rem) !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.03em !important;
+  background: linear-gradient(135deg, var(--ds-text-primary) 40%, var(--ds-accent));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.arena-tagline {
+  font-size: var(--text-caption);
+  font-weight: 500;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--ds-text-secondary);
+  padding: 2px 8px;
+  border: 1px solid var(--ds-border);
+  border-radius: 4px;
+  background: var(--ds-bg-secondary);
+}
+
+/* ——— Game outcome animations ——— */
+@keyframes pulse-success {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--ds-success) 40%, transparent); }
+  50% { box-shadow: 0 0 0 6px color-mix(in oklch, var(--ds-success) 0%, transparent); }
+}
+@keyframes shake-failure {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-4px); }
+  40% { transform: translateX(4px); }
+  60% { transform: translateX(-3px); }
+  80% { transform: translateX(3px); }
+}
+@keyframes slide-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.ds-banner { animation: slide-in 0.2s ease; }
+.ds-banner--ok  { animation: slide-in 0.2s ease, pulse-success 1.2s ease 0.2s 2; }
+.ds-banner--danger { animation: slide-in 0.2s ease, shake-failure 0.35s ease 0.15s; }
+
+/* ——— Stronger HUD look ——— */
+.ds-hud {
+  background: linear-gradient(180deg, var(--ds-surface) 0%, var(--ds-bg-secondary) 100%) !important;
+}
+.ds-h3--kpi { font-variant-numeric: tabular-nums; }
+
+/* ——— Mission tab instruction card polish ——— */
+.ds-section-gap .ds-lead--tight strong { color: var(--ds-text-primary); }
+
+/* ——— Cascade depth colours match game tone ——— */
+.cascade-ok    { border-left: 3px solid var(--ds-success); }
+.cascade-warn  { border-left: 3px solid var(--ds-warning); }
+.cascade-danger { border-left: 3px solid var(--ds-danger); }
+
+/* ——— Overflow guard for narrow screens ——— */
+@media (max-width: 480px) {
+  .arena-title-row { flex-direction: column; gap: var(--s-1); }
+  .ds-hud__kpis { grid-template-columns: 1fr 1fr; }
+  .loadouts { grid-template-columns: 1fr; }
+}
