@@ -190,12 +190,32 @@ def load_model_and_tokenizer(model_name: str, backend: str = "hf", seed: int = 4
     - backend="unsloth": FastLanguageModel path when available
     """
     if backend == "unsloth":
+        import torch
+
+        if not torch.cuda.is_available():
+            raise RuntimeError(
+                "Unsloth needs a CUDA GPU and a CUDA-enabled PyTorch wheel. "
+                "torch.cuda.is_available() is False — you may be on a CPU runtime or have "
+                "installed torch CPU-only (e.g. 2.x+cpu). "
+                "Colab: Runtime → Change runtime type → GPU, then restart. "
+                "If torch is still +cpu: pip install torch --index-url "
+                "https://download.pytorch.org/whl/cu124 "
+                "Or use --backend hf (also needs GPU for practical 4-bit training)."
+            )
         try:
             from unsloth import FastLanguageModel  # type: ignore
+        except NotImplementedError as exc:
+            if "accelerator" in str(exc).lower() or "gpu" in str(exc).lower():
+                raise RuntimeError(
+                    "Unsloth could not find a torch accelerator. "
+                    "Use a machine with CUDA, a GPU runtime, and PyTorch built with CUDA (not +cpu). "
+                    "Try: --backend hf"
+                ) from exc
+            raise
         except Exception as exc:
             raise RuntimeError(
-                "Unsloth backend requested but package is unavailable. "
-                "Install requirements-train.txt (includes unsloth) or use --backend hf."
+                "Unsloth import/load failed. Install training deps (pip install -r requirements-train.txt) "
+                "or use --backend hf. Original error: " + str(exc)
             ) from exc
 
         print("Loading model/tokenizer via Unsloth...")
