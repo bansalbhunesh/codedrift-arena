@@ -34,6 +34,7 @@ ALL_PATTERNS: list[str] = [
     "type_mismatch",
     "condition_flip",
     "off_by_one",
+    "cascade",
 ]
 
 DIFFICULTY_TO_COUNT: dict[str, int] = {"easy": 1, "medium": 2, "hard": 3}
@@ -306,6 +307,28 @@ def _spec_off_by_one() -> _PatternSpec:
     )
 
 
+def _spec_cascade() -> _PatternSpec:
+    """Hidden cause: break the deepest function in a 3-frame chain.
+
+    The base repo defines ``process_order -> enrich_user -> fetchUserData``.
+    We mutate ``fetchUserData`` to return ``None`` so the test failure surfaces
+    inside ``enrich_user`` (KeyError on ``user["id"]``) — the agent must trace
+    two frames back to identify ``fetchUserData`` as the actual root cause.
+    """
+    return _PatternSpec(
+        name="cascade",
+        target_fn="fetchUserData",
+        builder=lambda: _NullableReturnTransformer("fetchUserData"),
+        detail={
+            "function": "fetchUserData",
+            "chain_depth": 3,
+            "surface_function": "process_order",
+            "intermediate": "enrich_user",
+            "hidden_cause": "fetchUserData returns None; enrich_user crashes; process_order fails",
+        },
+    )
+
+
 _PATTERN_BUILDERS: dict[str, Callable[[], _PatternSpec]] = {
     "rename": _spec_rename,
     "removal": _spec_removal,
@@ -315,6 +338,7 @@ _PATTERN_BUILDERS: dict[str, Callable[[], _PatternSpec]] = {
     "type_mismatch": _spec_type_mismatch,
     "condition_flip": _spec_condition_flip,
     "off_by_one": _spec_off_by_one,
+    "cascade": _spec_cascade,
 }
 
 

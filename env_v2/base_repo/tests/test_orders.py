@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from src.orders import (
     createOrder,
+    enrich_user,
     fetchUserData,
     getPageItems,
+    process_order,
     sendNotification,
     validateInput,
 )
@@ -41,3 +43,16 @@ def test_send_notification_int_user_id():
     rec = sendNotification(7890, "hello")
     assert rec["user_id"] == 7890
     assert rec["message"] == "hello"
+
+
+def test_enrich_user_uses_fetch_user_data():
+    profile = enrich_user("u1")
+    assert profile["id"] == "u1"
+    assert profile["name"] == "alice"
+
+
+def test_process_order_two_frame_chain():
+    order = process_order("u1", "widget", 2)
+    assert order["customer"] == "alice"
+    assert order["item"] == "widget"
+    assert order["qty"] == 2

@@ -183,6 +183,68 @@ def fill_trained_model(env: CodeDriftEnv | None) -> str:
     return _trained_response_for(env)
 
 
+def _build_cascade_html(env: CodeDriftEnv | None) -> str:
+    """Render the failing-test → ... → root-cause cascade for the active episode.
+
+    Uses the FailureCascade simulator's call_chain for every action so judges
+    can see *where* the failure surfaces vs *what* actually caused it.
+    """
+    if env is None or not env.stale_actions:
+        return (
+            "<div class='cd-card cd-kpi' style='opacity:.75'>"
+            "Start an episode to see the failure cascade."
+            "</div>"
+        )
+
+    cascade = env.failure_cascade
+    cascade_calls = list(getattr(cascade, "calls", []) or []) if cascade else []
+    chains_by_action: dict[str, list[str]] = {}
+    for call in cascade_calls:
+        key = getattr(call, "stale_ref", "")
+        chains_by_action.setdefault(str(key), []).append(
+            f"{getattr(call, 'caller', '?')}() at {getattr(call, 'file', '?')}:{getattr(call, 'line', '?')}"
+        )
+
+    rows: list[str] = []
+    for idx, action in enumerate(env.stale_actions, start=1):
+        stale = action.stale_ref
+        kind = action.drift_type
+        chain_frames = chains_by_action.get(stale, [])
+        if not chain_frames and action.metadata:
+            # Fallback: synthesize a depth-2 chain from metadata when available.
+            surface = action.metadata.get("surface_function") or "failing_test"
+            mid = action.metadata.get("intermediate") or action.metadata.get("caller") or "caller"
+            chain_frames = [f"{surface}()", f"{mid}()"]
+        if not chain_frames:
+            chain_frames = ["failing_test()"]
+        depth = len(chain_frames) + 1  # +1 for the stale_ref node itself
+
+        nodes = chain_frames + [f"<b>{stale}</b>"]
+        chain_html = " <span style='opacity:.55'>→</span> ".join(nodes)
+        depth_color = "#22c55e" if depth <= 2 else "#f59e0b" if depth == 3 else "#ef4444"
+        depth_label = "shallow" if depth <= 2 else "indirect" if depth == 3 else "hidden cause"
+
+        rows.append(
+            "<div class='cd-card cd-kpi' style='margin:6px 0'>"
+            f"<div style='font-size:11px; opacity:.65; text-transform:uppercase'>"
+            f"#{idx} · {kind}"
+            f" <span style='float:right; color:{depth_color}'>depth {depth} · {depth_label}</span>"
+            "</div>"
+            f"<div style='margin-top:4px; font-family:ui-monospace, Menlo, Consolas, monospace; font-size:13px'>"
+            f"{chain_html}"
+            "</div>"
+            "</div>"
+        )
+
+    return (
+        "<div class='cd-card cd-kpi' style='margin-bottom:6px'>"
+        "<b>🧬 Failure cascade</b> — where the test crashes vs where the bug actually lives. "
+        "Deeper chains (depth ≥ 3) are <i>hidden-cause</i> bugs the reviewer must trace back."
+        "</div>"
+        + "".join(rows)
+    )
+
+
 def _scenario_overrides(scenario_mode: str, difficulty: str, personality: str) -> tuple[str, str]:
     """Map judge-friendly modes to deterministic env knobs."""
     mode = (scenario_mode or "Random").strip().lower()
@@ -507,6 +569,7 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
                 btn_trained = gr.Button("▶ Trained Model (Wins)", variant="secondary")
 
             btn_submit = gr.Button("⚖️ Score review", variant="primary")
+            cascade_panel = gr.HTML("<div class='cd-card cd-kpi' style='opacity:.75'>Start an episode to see the failure cascade.</div>")
             scorer_out = gr.Textbox(label="Causal Reward Breakdown (JSON)", lines=12, max_lines=20, interactive=False)
             replay_out = gr.Markdown("No replay events yet. Score some reviews to populate this panel.")
 
@@ -765,12 +828,16 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
         new_episode,
         inputs=[difficulty, personality, seed, scenario_mode, replay_state],
         outputs=_new_ep_outputs,
+    ).then(
+        _build_cascade_html, inputs=[env_state], outputs=[cascade_panel]
     )
 
     btn_submit.click(
         submit_review,
         inputs=[env_state, review, replay_state],
         outputs=_step_outputs,
+    ).then(
+        _build_cascade_html, inputs=[env_state], outputs=[cascade_panel]
     )
 
     btn_benchmark.click(
@@ -783,6 +850,8 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
         new_episode,
         inputs=[difficulty, personality, seed, scenario_mode, replay_state],
         outputs=_new_ep_outputs,
+    ).then(
+        _build_cascade_html, inputs=[env_state], outputs=[cascade_panel]
     )
 
 if __name__ == "__main__":

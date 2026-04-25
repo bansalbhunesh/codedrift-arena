@@ -44,3 +44,25 @@ def getPageItems(items, page):
 def sendNotification(user_id, message):
     """Build a notification record from int user_id."""
     return {"user_id": int(user_id), "message": str(message)}
+
+
+def enrich_user(user_id):
+    """Layer between callers and fetchUserData — surfaces a friendly profile.
+
+    This is intentionally a thin wrapper so cascade-style bugs (e.g. a wrong
+    return type from fetchUserData) propagate up two frames before crashing.
+    """
+    user = fetchUserData(user_id)
+    return {"id": user["id"], "name": user["email"].split("@")[0], "active": user["active"]}
+
+
+def process_order(user_id, item, qty):
+    """Top-level entry point. Calls enrich_user -> fetchUserData internally.
+
+    Mutating fetchUserData causes process_order's tests to fail with a
+    multi-frame traceback: test -> process_order -> enrich_user -> fetchUserData.
+    """
+    profile = enrich_user(user_id)
+    order = createOrder(item, qty)
+    order["customer"] = profile["name"]
+    return order
