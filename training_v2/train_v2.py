@@ -134,8 +134,110 @@ def build_dataset(
     return rows
 
 
-# ── Format fields the V2 reviewer is expected to produce ─────────────────────
-_V2_REQUIRED_FIELDS = ("VERDICT:", "ROOT_CAUSE:", "FAILURE_PATH:", "CONFIDENCE:", "ISSUES:", "REASON:")
+# ── V2 output schema: JSON keys the model must produce ───────────────────────
+# The V2 prompt asks for a JSON object, NOT KEY: value lines. The scaffold
+# checks for JSON key strings (e.g. '"verdict"') not V1 markers ("VERDICT:").
+_V2_JSON_KEYS = ('"verdict"', '"root_cause"', '"failure_path"', '"confidence"', '"reasoning"')
+
+# Error types per bug pattern — used in gold responses
+_V2_GOLD_ERRORS: dict[str, str] = {
+    "rename":         "AttributeError",
+    "partial_rename": "AttributeError",
+    "removal":        "ModuleNotFoundError",
+    "contract":       "TypeError",
+    "null_missing":   "AttributeError",
+    "type_mismatch":  "TypeError",
+    "condition_flip": "AssertionError",
+    "off_by_one":     "IndexError",
+}
+
+
+def _gold_response_v2(row: dict) -> str:
+    """Gold JSON response for a V2 dataset row — used only during SFT warmup.
+
+    Builds a schema-correct JSON string from the ground_truth dict so the SFT
+    warmup teaches the model the JSON output format before GRPO starts. The
+    content is grounded in ground_truth so it is genuinely correct, not random.
+    """
+    gt = row.get("ground_truth", {})
+    verdict = gt.get("verdict", "REQUEST_CHANGES")
+    root_cause = gt.get("root_cause", "")
+    failure_path = gt.get("failure_path", [])
+    patterns = row.get("patterns", [])
+    pattern = patterns[0] if patterns else "rename"
+    error = _V2_GOLD_ERRORS.get(pattern, "RuntimeError")
+    symbol = root_cause.split("::")[-1] if "::" in root_cause else root_cause
+    reasoning = (
+        f"{symbol} is stale — calling it will raise {error} at runtime. "
+        f"Update all call sites before merging."
+        if root_cause
+        else "No stale references detected. PR is consistent with the current codebase."
+    )
+    return json.dumps({
+        "verdict": verdict,
+        "root_cause": root_cause,
+        "failure_path": failure_path[:3] if failure_path else [],
+        "confidence": 0.92 if root_cause else 0.90,
+        "reasoning": reasoning,
+    })
+
+
+def run_sft_warmup_v2(model, tokenizer, rows: list[dict], n_steps: int, lr: float = 2e-4) -> None:
+    """SFT warmup for V2: teach JSON output format before GRPO.
+
+    Without this, the base model (Qwen2.5-1.5B-Instruct) generates verbose
+    natural language prose. parse_reviewer_output finds no JSON → MalformedPrediction
+    → MALFORMED_PENALTY=-0.5 on every completion → std=0 → loss=0 forever.
+
+    50 steps on gold examples is enough to collapse the model onto JSON output.
+    GRPO then has signal to tune which JSON content is correct.
+    """
+    from datasets import Dataset
+    import inspect
+
+    log.info("SFT warmup V2: %d steps on %d rows", n_steps, len(rows))
+    sft_data = []
+    for row in rows[: min(len(rows), n_steps * 8)]:
+        gold = _gold_response_v2(row)
+        messages = [
+            {"role": "user", "content": row["prompt"]},
+            {"role": "assistant", "content": gold},
+        ]
+        try:
+            text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=False)
+        except Exception:
+            text = row["prompt"] + "\n\n" + gold
+        sft_data.append({"text": text})
+
+    if not sft_data:
+        log.warning("SFT warmup V2 skipped — no rows available")
+        return
+
+    sft_dataset = Dataset.from_list(sft_data)
+    try:
+        from trl import SFTTrainer, SFTConfig
+        sft_config = SFTConfig(
+            max_steps=n_steps,
+            learning_rate=lr,
+            per_device_train_batch_size=1,
+            gradient_accumulation_steps=2,
+            output_dir="/tmp/codedrift_v2_sft_warmup",
+            logging_steps=max(1, n_steps // 5),
+            report_to="none",
+            max_seq_length=1536,
+            dataset_text_field="text",
+            save_strategy="no",
+        )
+        sft_kwargs = dict(model=model, args=sft_config, train_dataset=sft_dataset)
+        sft_params = inspect.signature(SFTTrainer.__init__).parameters
+        if "processing_class" in sft_params:
+            sft_kwargs["processing_class"] = tokenizer
+        elif "tokenizer" in sft_params:
+            sft_kwargs["tokenizer"] = tokenizer
+        SFTTrainer(**sft_kwargs).train()
+        log.info("SFT warmup V2 complete")
+    except Exception as exc:
+        log.warning("SFT warmup V2 failed (%s) — continuing without warmup", exc)
 
 
 def _to_text(completion) -> str:
@@ -162,19 +264,17 @@ def _to_text(completion) -> str:
 
 
 def _format_scaffold(text: str) -> float:
-    """Small additive bonus per format field present (max +0.18).
+    """Small additive bonus per JSON key present in the response (max +0.15).
 
-    Creates a gradient bridge between the malformed penalty (−0.5, all fields
-    absent) and a correct answer (+2.0). Without this, a model that outputs
-    the right fields but wrong content has no incentive to learn the format —
-    it gets −0.5 either way and GRPO sees zero advantage within the group.
+    V2 expects a JSON object — check for '"verdict"', '"root_cause"' etc., NOT
+    the V1 KEY:VALUE markers. Without this fix, the scaffold gave 0 for every
+    V2 response even when the model was outputting partial JSON.
 
-    +0.03 per field × 6 fields = +0.18 max. A well-formatted wrong answer
-    scores −0.32 vs −0.5 for random garbage — small enough not to reward
-    format alone, large enough to provide a gradient.
+    +0.03 per key × 5 keys = +0.15 max. Moves malformed reward from −0.5 to
+    −0.35 as the model learns to include more keys — giving GRPO a gradient
+    to climb before content is correct.
     """
-    upper = text.upper()
-    return min(sum(0.03 for f in _V2_REQUIRED_FIELDS if f in upper), 0.18)
+    return min(sum(0.03 for k in _V2_JSON_KEYS if k in text), 0.15)
 
 
 def make_reward_fn(
@@ -301,6 +401,13 @@ def train(args: argparse.Namespace) -> None:
     from training.train import load_model_and_tokenizer  # reuse v1 loader + dtype guards
 
     model, tokenizer = load_model_and_tokenizer(args.model, backend=args.backend, seed=args.seed)
+
+    # SFT warmup: teach JSON output format before GRPO starts.
+    # Without this, base model outputs verbose prose → parse_reviewer_output returns
+    # MalformedPrediction → MALFORMED_PENALTY=-0.5 on every completion → std=0 → loss=0.
+    if args.sft_warmup_steps > 0:
+        print(f"\nRunning V2 SFT warmup ({args.sft_warmup_steps} steps)...")
+        run_sft_warmup_v2(model, tokenizer, rows, n_steps=args.sft_warmup_steps)
     trainable_params = sum(p.numel() for p in model.parameters() if getattr(p, "requires_grad", False))
     if trainable_params <= 0:
         raise RuntimeError(
@@ -395,6 +502,10 @@ def parse_args() -> argparse.Namespace:
         help="Build dataset with uniform random episodes (faster to generate)",
     )
     p.add_argument("--dry_run", action="store_true", default=False, help="Build dataset and exit")
+    # SFT warmup: 0 = skip. Teach JSON format before GRPO so early rollouts
+    # produce parseable output and reward variance is non-zero from step 1.
+    p.add_argument("--sft_warmup_steps", type=int, default=50,
+                   help="SFT format warmup steps before GRPO (0 to skip)")
     return p.parse_args()
 
 
