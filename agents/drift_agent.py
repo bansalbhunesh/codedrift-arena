@@ -407,6 +407,23 @@ class DriftAgent:
             bug_pattern="off_by_one",
         )
 
+    # Backward-compatible aliases for legacy smoke scripts that call _apply_*.
+    # Keep these thin wrappers so external judge scripts don't break.
+    def _apply_partial_rename(self, drifted) -> Optional[DriftAction]:
+        return self._do_partial_rename(drifted)
+
+    def _apply_null_missing(self, drifted) -> Optional[DriftAction]:
+        return self._do_null_missing(drifted)
+
+    def _apply_type_mismatch(self, drifted) -> Optional[DriftAction]:
+        return self._do_type_mismatch(drifted)
+
+    def _apply_condition_flip(self, drifted) -> Optional[DriftAction]:
+        return self._do_condition_flip(drifted)
+
+    def _apply_off_by_one(self, drifted) -> Optional[DriftAction]:
+        return self._do_off_by_one(drifted)
+
     def describe(self) -> str:
         return f"DriftAgent(personality={self.personality}, episodes_run={self.episode_count})"
 

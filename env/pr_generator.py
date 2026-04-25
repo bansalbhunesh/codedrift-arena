@@ -92,8 +92,10 @@ class PRDiffGenerator:
             elif action.drift_type == "rename":
                 stale_lines.append(f"data = {action.stale_ref}(user_id)")
             elif action.drift_type == "removal":
-                module = action.metadata.get("module", action.stale_ref)
-                stale_lines.append(f"from {module} import helper  # stale import")
+                module = str(action.metadata.get("module") or action.stale_ref).replace("/", ".").replace(".py", "")
+                # Include both dotted import and original stale file path so
+                # scorer/tests can ground either representation.
+                stale_lines.append(f"from {module} import helper  # stale import from {action.stale_ref}")
             elif action.drift_type == "contract":
                 fn = action.metadata.get("function", "unknown")
                 old_params = action.metadata.get("old_params", [])
