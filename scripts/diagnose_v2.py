@@ -84,10 +84,10 @@ def test_tokenization(env_data: dict | None, tokenizer) -> None:
     obs = env_data["obs"]
     tokens = tokenizer(obs.prompt, return_tensors="pt")
     n_tokens = tokens["input_ids"].shape[-1]
-    check("prompt fits in 1024 tokens", n_tokens <= 1024,
+    check("prompt fits in 2048 tokens", n_tokens <= 2048,
           f"prompt token count: {n_tokens}")
-    if n_tokens > 1024:
-        print(f"  {WARN} Prompt will be TRUNCATED by TRL to 1024 tokens. "
+    if n_tokens > 2048:
+        print(f"  {WARN} Prompt will be TRUNCATED by TRL to 2048 tokens. "
               "Model loses context — increase --max_prompt_length.")
 
 
@@ -117,7 +117,7 @@ def test_generation(env_data: dict | None, model, tokenizer) -> list[str] | None
 
     completions: list[str] = []
     for trial in range(4):
-        with torch.no_grad():
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.float16):
             out = model.generate(
                 prompt_ids,
                 max_new_tokens=384,

@@ -480,7 +480,9 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--warmup_steps", type=int, default=10)
     p.add_argument("--logging_steps", type=int, default=5, help="Higher = less log I/O, faster")
     p.add_argument("--save_steps", type=int, default=200)
-    p.add_argument("--max_prompt_length", type=int, default=1024)
+    # 1024 truncates prompts (~1600 tokens) — model never sees full diff+tests.
+    # 2048 fits the full context with room to spare.
+    p.add_argument("--max_prompt_length", type=int, default=2048)
     # 384 minimum: a full VERDICT+ROOT_CAUSE+FAILURE_PATH+CONFIDENCE+ISSUES+REASON
     # response needs 200-400 tokens. Below 256 every completion is truncated →
     # MALFORMED_PENALTY (-0.5) on all → std=0 → zero GRPO gradient.

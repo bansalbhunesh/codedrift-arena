@@ -400,7 +400,7 @@ def load_model_and_tokenizer(model_name: str, backend: str = "hf", seed: int = 4
         print("Loading model/tokenizer via Unsloth...")
         model, tokenizer = FastLanguageModel.from_pretrained(
             model_name=model_name,
-            max_seq_length=1536,
+            max_seq_length=2560,
             load_in_4bit=True,
         )
         model = FastLanguageModel.get_peft_model(
@@ -621,7 +621,8 @@ def parse_args():
     p.add_argument("--warmup_steps", type=int, default=20)
     p.add_argument("--logging_steps", type=int, default=5)
     p.add_argument("--save_steps", type=int, default=200)
-    p.add_argument("--max_prompt_length", type=int, default=1024)
+    # 1024 truncates prompts (~1600 tokens) — model never sees full diff+tests.
+    p.add_argument("--max_prompt_length", type=int, default=2048)
     p.add_argument(
         "--bf16",
         action="store_true",
