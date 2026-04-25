@@ -14,12 +14,16 @@ import gradio as gr
 from codedrift.logutil import configure_logging
 from env.codedrift_env import CodeDriftEnv
 from hf_space.real_pr_scorer import (
+    MAX_DIFF_BYTES,
     detect_languages,
     extract_candidate_stale_refs,
+    fetch_diff_from_url,
     score_real_pr,
 )
 
 configure_logging()
+
+MAX_FETCH_BYTES_FMT = f"{MAX_DIFF_BYTES:,}"
 
 
 def _fmt_info(info: dict[str, Any]) -> str:
@@ -491,19 +495,28 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
             scorer_out = gr.Textbox(label="Causal Reward Breakdown (JSON)", lines=12, max_lines=20, interactive=False)
             replay_out = gr.Markdown("No replay events yet. Score some reviews to populate this panel.")
 
-    with gr.Accordion("🌍 Score a Real PR (multi-language, auto-detect)", open=False):
+    with gr.Accordion("🌍 Score a Real PR (multi-language, auto-detect, URL fetch)", open=False):
         gr.Markdown(
             "<div class='cd-card cd-kpi'>"
-            "Paste a unified <code>git diff</code> from any language. The detector lists "
-            "candidate stale references it found (symbols removed but not re-added). "
-            "Edit/confirm them, paste your reviewer response, and click <b>Score Real PR</b>. "
-            "<br><b>Honest note:</b> this does not run the PR's real test suite — the "
-            "reward is based on whether your review's <code>ISSUES</code> block cites the "
-            "stale refs you (or the detector) confirmed."
+            "<b>Two ways to load a PR:</b><br>"
+            "• <b>Paste a unified diff</b> directly, or<br>"
+            "• <b>Paste a GitHub URL</b> (PR / commit / compare / raw <code>.diff</code>) "
+            "and click <b>Fetch from GitHub</b> — the diff and detected stale refs auto-populate.<br><br>"
+            "<b>Honest note:</b> this does <i>not</i> run the PR's real test suite. The reward is based on "
+            "whether your review's <code>ISSUES</code> block cites the stale refs you (or the detector) confirmed."
             "</div>"
         )
+        with gr.Row():
+            real_url = gr.Textbox(
+                label="🔗 GitHub URL (PR / commit / compare / raw .diff)",
+                placeholder="https://github.com/bansalbhunesh/codedrift-arena/pull/1",
+                lines=1,
+                scale=4,
+            )
+            btn_fetch_url = gr.Button("⬇️ Fetch from GitHub", variant="secondary", scale=1)
+        url_status = gr.Markdown("")
         real_diff = gr.Textbox(
-            label="📥 Paste unified diff (any language)",
+            label="📥 Unified diff (paste here OR fetched from URL above)",
             lines=12,
             placeholder="diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ ...",
             elem_id="real_pr_diff_box",
@@ -515,7 +528,7 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
                 value="rename",
                 label="Drift kind (how to score)",
             )
-        detect_summary = gr.Markdown("Click *Detect* after pasting a diff.")
+        detect_summary = gr.Markdown("Click *Detect* after pasting a diff or fetching one from a URL.")
         real_stale = gr.Textbox(
             label="✏️ Stale refs to score against (one per line — edit before scoring)",
             lines=4,
@@ -574,6 +587,39 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
                     _fmt_info({"error": str(exc), "type": type(exc).__name__}),
                 )
 
+        def _on_fetch(url_text: str) -> tuple[str, str, str, str]:
+            """Returns (status_md, diff_text, detect_summary_md, stale_refs_text)."""
+            url = (url_text or "").strip()
+            if not url:
+                return ("### ⚠️ Paste a GitHub URL first.", "", "", "")
+            try:
+                result = fetch_diff_from_url(url)
+            except Exception as exc:
+                return (
+                    f"### ❌ Fetch failed: {exc!s}",
+                    "",
+                    "Try the raw `.diff` URL or set `GITHUB_TOKEN` for private repos.",
+                    "",
+                )
+            head = (
+                f"### ✅ Fetched **{result.bytes_received:,} bytes** from "
+                f"`{result.resolved_url}`"
+            )
+            extras = []
+            if result.truncated:
+                extras.append(f"⚠️ Truncated to {MAX_FETCH_BYTES_FMT} bytes for safety.")
+            if result.note:
+                extras.append(result.note)
+            status_md = head + ("\n\n" + "\n\n".join(extras) if extras else "")
+            # Auto-run detection so the user sees candidates immediately.
+            detect_md, candidates = _on_detect(result.diff)
+            return status_md, result.diff, detect_md, candidates
+
+        btn_fetch_url.click(
+            _on_fetch,
+            inputs=[real_url],
+            outputs=[url_status, real_diff, detect_summary, real_stale],
+        )
         btn_detect.click(
             _on_detect, inputs=[real_diff], outputs=[detect_summary, real_stale]
         )

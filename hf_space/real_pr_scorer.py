@@ -9,6 +9,9 @@ What this module does:
 - ``score_real_pr(...)``: rebuilds a synthetic episode using
   :meth:`env.codedrift_env.CodeDriftEnv.inject_episode` and scores the
   reviewer response against the stale refs the user confirms.
+- ``fetch_diff_from_url(url)``: pulls a unified diff from a GitHub PR /
+  commit / compare / raw URL. Public-only by default; truncates oversized
+  payloads to keep the Space safe.
 
 Caveats (we tell the user this in the UI):
 - We do not run the PR's real test suite. The reward is based on whether the
@@ -21,7 +24,9 @@ Caveats (we tell the user this in the UI):
 from __future__ import annotations
 
 import copy
+import os
 import re
+import urllib.parse
 from dataclasses import dataclass, field
 from typing import Iterable, Optional
 
@@ -285,3 +290,117 @@ def score_real_pr(
     obs, reward, done, info = env.step(review)
     summary = detect_languages(pr_diff).__dict__
     return float(reward), info, summary
+
+
+# ── URL fetch helpers ────────────────────────────────────────────────────────
+
+MAX_DIFF_BYTES = 200_000  # 200 KB hard cap to keep the Space safe.
+_REQUEST_TIMEOUT_S = 15
+
+
+@dataclass
+class FetchResult:
+    diff: str
+    source_url: str
+    resolved_url: str
+    bytes_received: int
+    truncated: bool
+    note: str = ""
+
+
+_PR_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+)/pull/(\d+)(?:[/?#].*)?$", re.IGNORECASE)
+_COMMIT_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+)/commit/([0-9a-f]{6,40})(?:[/?#].*)?$", re.IGNORECASE)
+_COMPARE_RE = re.compile(r"^https?://github\.com/([^/]+)/([^/]+)/compare/([^?#]+)(?:[/?#].*)?$", re.IGNORECASE)
+
+
+def _resolve_github_url(url: str) -> str:
+    """Convert PR/commit/compare URLs to their raw .diff form. Otherwise return as-is."""
+    url = url.strip()
+    if not url:
+        return url
+    m = _PR_RE.match(url)
+    if m:
+        owner, repo, num = m.group(1), m.group(2), m.group(3)
+        return f"https://github.com/{owner}/{repo}/pull/{num}.diff"
+    m = _COMMIT_RE.match(url)
+    if m:
+        owner, repo, sha = m.group(1), m.group(2), m.group(3)
+        return f"https://github.com/{owner}/{repo}/commit/{sha}.diff"
+    m = _COMPARE_RE.match(url)
+    if m:
+        owner, repo, rng = m.group(1), m.group(2), m.group(3)
+        return f"https://github.com/{owner}/{repo}/compare/{rng}.diff"
+    return url
+
+
+def fetch_diff_from_url(
+    url: str,
+    *,
+    token: Optional[str] = None,
+    max_bytes: int = MAX_DIFF_BYTES,
+) -> FetchResult:
+    """Fetch a unified diff from a GitHub PR / commit / compare / raw URL.
+
+    Public repos work without a token. Pass ``token`` (or set the
+    ``GITHUB_TOKEN`` env var on the host) to fetch from a private repo or to
+    avoid anonymous rate limits.
+    """
+    if not url or not url.strip():
+        raise ValueError("url is empty")
+    parsed = urllib.parse.urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"}:
+        raise ValueError("only http(s) URLs are supported")
+
+    resolved = _resolve_github_url(url.strip())
+
+    try:
+        import requests  # local import so module stays importable without HTTP stack
+    except ImportError as exc:  # pragma: no cover
+        raise RuntimeError("'requests' is required to fetch URLs (pip install requests)") from exc
+
+    headers = {
+        "Accept": "application/vnd.github.v3.diff, text/x-diff, text/plain, */*",
+        "User-Agent": "codedrift-arena/0.1 (+https://github.com/bansalbhunesh/codedrift-arena)",
+    }
+    eff_token = (token or os.environ.get("GITHUB_TOKEN", "")).strip()
+    if eff_token:
+        headers["Authorization"] = f"Bearer {eff_token}"
+
+    resp = requests.get(resolved, headers=headers, timeout=_REQUEST_TIMEOUT_S, stream=True)
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"GitHub fetch failed ({resp.status_code}): "
+            f"{(resp.text or '')[:200]} — try the raw .diff URL or set GITHUB_TOKEN."
+        )
+
+    chunks: list[bytes] = []
+    received = 0
+    truncated = False
+    for chunk in resp.iter_content(chunk_size=8192):
+        if not chunk:
+            continue
+        if received + len(chunk) > max_bytes:
+            chunks.append(chunk[: max_bytes - received])
+            received = max_bytes
+            truncated = True
+            break
+        chunks.append(chunk)
+        received += len(chunk)
+    body = b"".join(chunks).decode("utf-8", errors="replace")
+
+    note = ""
+    looks_like_diff = body.lstrip().startswith(("diff --git", "---", "Index:"))
+    if not looks_like_diff:
+        note = (
+            "Response did not look like a unified diff. "
+            "Try a `.diff` URL (PR link works automatically; for raw text use the .diff suffix)."
+        )
+
+    return FetchResult(
+        diff=body,
+        source_url=url.strip(),
+        resolved_url=resolved,
+        bytes_received=received,
+        truncated=truncated,
+        note=note,
+    )
