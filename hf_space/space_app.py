@@ -107,7 +107,7 @@ def _hud_html(player: dict[str, Any]) -> str:
         last_pill = "<span class='hud-pill hud-pill-amber'>last: PARTIAL</span>"
 
     return f"""
-<section class="hud">
+<section class="hud" aria-label="Mission HUD">
   <div class="hud-row">
     <div class="hud-cell">
       <div class="hud-label">CALLSIGN</div>
@@ -134,7 +134,7 @@ def _hud_html(player: dict[str, Any]) -> str:
       </div>
     </div>
   </div>
-  <div class="hud-meta">{last_pill}</div>
+  <div class="hud-meta" aria-live="polite">{last_pill}</div>
 </section>
 """.strip()
 
@@ -208,7 +208,7 @@ def _status_banner(reward: float, info: dict[str, Any]) -> str:
 
     xp_sign = f"+{xp}" if xp >= 0 else f"{xp}"
     return f"""
-<section class="banner banner-{tone}">
+<section class="banner banner-{tone}" role="status" aria-live="polite">
   <header class="banner-head">
     <span class="banner-badge">{icon} {label}</span>
     <span class="banner-xp">{xp_sign} XP</span>
@@ -457,12 +457,12 @@ def new_episode(
         env = CodeDriftEnv(difficulty=eff_difficulty, personality=eff_personality, seed=s)
         obs = env.reset()
         status = (
-            f"<div class='mission-strip mission-active'>"
+            f"<section class='mission-strip mission-active' role='status' aria-live='polite'>"
             f"<span class='mission-tag'>MISSION ACTIVE</span>"
             f"<span class='mission-id'><code>{env.episode_id}</code></span>"
             f"<span class='mission-meta'>mode <b>{scenario_mode}</b> · level <b>{eff_difficulty}</b> · adversary <b>{eff_personality}</b></span>"
             f"<span class='mission-meta'>ground-truth bugs: <b>{obs.n_stale_refs}</b> (hidden)</span>"
-            f"</div>"
+            f"</section>"
         )
         return (
             env, obs.prompt, obs.pr_diff, obs.codebase_context, obs.test_output, "",
@@ -478,7 +478,7 @@ def new_episode(
         err = {"error": str(e), "type": type(e).__name__}
         return (
             None, "", "", "", "", "",
-            f"<div class='mission-strip mission-error'>FAILED TO START · {e!s}</div>",
+            f"<section class='mission-strip mission-error' role='status' aria-live='polite'>FAILED TO START · {e!s}</section>",
             _brain_html(None),
             _fmt_info(err),
             replay_events, _replay_md(replay_events),
@@ -497,7 +497,7 @@ def submit_review(
     if env is None:
         return (
             None, "", "", "", "", "",
-            "<div class='mission-strip mission-error'>NO ACTIVE MISSION · click <b>Deploy Mission</b></div>",
+            "<section class='mission-strip mission-error' role='status' aria-live='polite'>NO ACTIVE MISSION · click <b>Deploy Mission</b></section>",
             _brain_html(None),
             _fmt_info({"error": "no_env"}),
             replay_events, _replay_md(replay_events),
@@ -506,7 +506,7 @@ def submit_review(
     if not review.strip():
         return (
             env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-            "<div class='mission-strip mission-warn'>EMPTY REPORT · paste a non-empty review</div>",
+            "<section class='mission-strip mission-warn' role='status' aria-live='polite'>EMPTY REPORT · paste a non-empty review</section>",
             _brain_html(env),
             _fmt_info({"error": "empty_review", "episode_id": env.episode_id}),
             replay_events, _replay_md(replay_events),
@@ -515,7 +515,7 @@ def submit_review(
     if not env.is_ready_for_step:
         return (
             env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-            "<div class='mission-strip mission-warn'>MISSION ALREADY SCORED · deploy a new mission</div>",
+            "<section class='mission-strip mission-warn' role='status' aria-live='polite'>MISSION ALREADY SCORED · deploy a new mission</section>",
             _brain_html(env),
             _fmt_info({"error": "episode_already_scored"}),
             replay_events, _replay_md(replay_events),
@@ -546,7 +546,7 @@ def submit_review(
         err = {"error": str(e), "type": "RuntimeError", "env": snap}
         return (
             env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-            "<div class='mission-strip mission-warn'>ALREADY SCORED · deploy a new mission to continue</div>",
+            "<section class='mission-strip mission-warn' role='status' aria-live='polite'>ALREADY SCORED · deploy a new mission to continue</section>",
             _brain_html(env),
             _fmt_info(err),
             replay_events, _replay_md(replay_events),
@@ -557,7 +557,7 @@ def submit_review(
         err = {"error": str(e), "type": type(e).__name__, "env": snap}
         return (
             env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-            f"<div class='mission-strip mission-error'>SCORING FAILED · {e!s}</div>",
+            f"<section class='mission-strip mission-error' role='status' aria-live='polite'>SCORING FAILED · {e!s}</section>",
             _brain_html(env),
             _fmt_info(err),
             replay_events, _replay_md(replay_events),
@@ -645,113 +645,161 @@ _SPACE_CSS = """
 @import url('https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
 :root {
-  --bg:        oklch(15% 0.025 250);
-  --bg-2:      oklch(18% 0.028 250);
-  --surface:   oklch(21% 0.030 250);
-  --surface-2: oklch(25% 0.035 250);
-  --border:    oklch(35% 0.040 250);
-  --border-2:  oklch(45% 0.050 250);
-  --text:      oklch(94% 0.010 250);
-  --muted:     oklch(70% 0.015 250);
-  --dim:       oklch(55% 0.015 250);
+  color-scheme: light dark;
+  --color-background: oklch(98% 0.01 250);
+  --color-background-elevated: oklch(96% 0.015 250);
+  --color-surface: oklch(100% 0 0);
+  --color-surface-2: oklch(97% 0.013 250);
+  --color-border: oklch(84% 0.02 250);
+  --color-border-strong: oklch(72% 0.03 250);
+  --color-text-primary: oklch(25% 0.02 250);
+  --color-text-secondary: oklch(40% 0.02 250);
+  --color-text-tertiary: oklch(52% 0.02 250);
+  --color-primary: oklch(56% 0.18 260);
+  --color-primary-strong: oklch(46% 0.20 260);
+  --color-primary-on: oklch(99% 0.01 250);
+  --color-success: oklch(55% 0.16 160);
+  --color-warning: oklch(72% 0.17 80);
+  --color-danger: oklch(56% 0.21 24);
+  --color-focus: oklch(64% 0.18 255);
+  --color-chart-junior: oklch(58% 0.15 30);
+  --color-chart-senior: oklch(56% 0.16 160);
 
-  --amber:   oklch(80% 0.16 75);
-  --amber-2: oklch(70% 0.18 70);
-  --mint:    oklch(80% 0.16 165);
-  --crimson: oklch(66% 0.22 22);
-  --violet:  oklch(72% 0.16 290);
-
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.5rem;
+  --space-6: 2rem;
+  --space-7: 3rem;
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --font-size-xs: 0.75rem;
+  --font-size-sm: 0.875rem;
+  --font-size-md: 1rem;
+  --font-size-lg: 1.125rem;
+  --font-size-xl: 1.5rem;
+  --font-size-2xl: clamp(1.75rem, 2.5vw, 2.5rem);
   --display: 'Major Mono Display', ui-monospace, monospace;
   --body:    'Chakra Petch', ui-sans-serif, system-ui, sans-serif;
   --code:    'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
 }
 
-/* Gradio shell */
-.gradio-container, .gradio-container * { font-family: var(--body); }
+@media (prefers-color-scheme: dark) {
+  :root {
+    --color-background: oklch(16% 0.025 250);
+    --color-background-elevated: oklch(18% 0.028 250);
+    --color-surface: oklch(21% 0.03 250);
+    --color-surface-2: oklch(25% 0.035 250);
+    --color-border: oklch(42% 0.04 250);
+    --color-border-strong: oklch(55% 0.05 250);
+    --color-text-primary: oklch(95% 0.01 250);
+    --color-text-secondary: oklch(84% 0.015 250);
+    --color-text-tertiary: oklch(72% 0.015 250);
+    --color-primary: oklch(72% 0.16 255);
+    --color-primary-strong: oklch(66% 0.18 255);
+    --color-primary-on: oklch(15% 0.02 250);
+    --color-success: oklch(74% 0.15 160);
+    --color-warning: oklch(80% 0.15 80);
+    --color-danger: oklch(70% 0.20 24);
+    --color-focus: oklch(76% 0.16 250);
+    --color-chart-junior: oklch(76% 0.14 55);
+    --color-chart-senior: oklch(76% 0.14 165);
+  }
+}
+
+/* Gradio shell + global typography */
+.gradio-container,
+.gradio-container * { font-family: var(--body); }
 .gradio-container {
-  background: radial-gradient(1200px 700px at 70% -10%, oklch(22% 0.04 250) 0%, var(--bg) 65%) !important;
-  color: var(--text) !important;
+  background:
+    radial-gradient(1200px 700px at 70% -10%, color-mix(in oklch, var(--color-primary) 16%, transparent) 0%, transparent 70%),
+    var(--color-background) !important;
+  color: var(--color-text-primary) !important;
   min-height: 100vh;
+  line-height: 1.5;
+}
+.gradio-container :is(h1, h2, h3, h4, h5) {
+  color: var(--color-text-primary) !important;
+  line-height: 1.25;
 }
 .gradio-container code, .gradio-container pre { font-family: var(--code); }
+.gradio-container :focus-visible {
+  outline: 2px solid var(--color-focus) !important;
+  outline-offset: 2px;
+}
 
 /* Inputs / textareas: terminal-mono */
 .gradio-container textarea,
 .gradio-container input[type="text"],
 .gradio-container input[type="number"] {
   font-family: var(--code) !important;
-  font-size: 12.5px !important;
-  background: var(--bg-2) !important;
-  color: var(--text) !important;
-  border: 1px solid var(--border) !important;
-  border-radius: 8px !important;
+  font-size: var(--font-size-sm) !important;
+  background: var(--color-surface) !important;
+  color: var(--color-text-primary) !important;
+  border: 1px solid var(--color-border) !important;
+  border-radius: var(--radius-sm) !important;
 }
 .gradio-container textarea:focus,
 .gradio-container input:focus {
-  border-color: var(--amber) !important;
+  border-color: var(--color-focus) !important;
   outline: none !important;
 }
 #pr_diff_box textarea, #test_output_box textarea, #real_pr_diff_box textarea {
   font-family: var(--code) !important;
-  font-size: 12px !important;
+  font-size: var(--font-size-sm) !important;
 }
 
 /* Labels */
 .gradio-container label, .gradio-container .label-wrap span {
   font-family: var(--body) !important;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.06em;
   text-transform: uppercase;
-  font-size: 11px !important;
-  color: var(--muted) !important;
+  font-size: var(--font-size-xs) !important;
+  color: var(--color-text-secondary) !important;
 }
 
-/* Buttons — arcade chunky */
+/* Buttons and controls */
 .gradio-container button {
   font-family: var(--body) !important;
-  font-weight: 600 !important;
+  font-weight: 700 !important;
   letter-spacing: 0.06em !important;
   text-transform: uppercase !important;
-  border-radius: 8px !important;
-  border: 1px solid var(--border-2) !important;
-  background: var(--surface) !important;
-  color: var(--text) !important;
+  border-radius: var(--radius-sm) !important;
+  border: 1px solid var(--color-border-strong) !important;
+  background: var(--color-surface) !important;
+  color: var(--color-text-primary) !important;
   transition: transform 120ms ease-out, background 120ms ease-out, border 120ms ease-out;
 }
 .gradio-container button:hover {
   transform: translateY(-1px);
-  background: var(--surface-2) !important;
-  border-color: var(--amber) !important;
+  background: var(--color-surface-2) !important;
+  border-color: var(--color-primary) !important;
 }
 .gradio-container button.primary, .gradio-container .primary > button {
-  background: var(--amber) !important;
-  color: oklch(20% 0.02 250) !important;
-  border-color: var(--amber-2) !important;
+  background: var(--color-primary) !important;
+  color: var(--color-primary-on) !important;
+  border-color: var(--color-primary-strong) !important;
 }
 .gradio-container button.primary:hover, .gradio-container .primary > button:hover {
-  background: var(--amber-2) !important;
+  background: var(--color-primary-strong) !important;
 }
 
 /* Tabs */
 .gradio-container .tab-nav button {
   font-family: var(--display) !important;
   letter-spacing: 0.10em !important;
-  font-size: 13px !important;
+  font-size: var(--font-size-sm) !important;
   background: transparent !important;
   border: 1px solid transparent !important;
   border-bottom: 2px solid transparent !important;
   border-radius: 0 !important;
-  color: var(--muted) !important;
+  color: var(--color-text-secondary) !important;
 }
 .gradio-container .tab-nav button.selected {
-  color: var(--amber) !important;
-  border-bottom-color: var(--amber) !important;
+  color: var(--color-primary) !important;
+  border-bottom-color: var(--color-primary) !important;
 }
 
 /* Generic surface used for every panel */
@@ -761,9 +809,9 @@ _SPACE_CSS = """
 
 /* ── HUD ───────────────────────────────────────────── */
 .hud {
-  border: 1px solid var(--border);
-  background: linear-gradient(180deg, var(--surface-2) 0%, var(--surface) 100%);
-  border-radius: 14px;
+  border: 1px solid var(--color-border);
+  background: linear-gradient(180deg, var(--color-surface-2) 0%, var(--color-surface) 100%);
+  border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5);
   position: relative;
   overflow: hidden;
@@ -772,57 +820,56 @@ _SPACE_CSS = """
   content: '';
   position: absolute;
   width: 14px; height: 14px;
-  border: 2px solid var(--amber);
+  border: 2px solid var(--color-primary);
   opacity: 0.6;
 }
 .hud::before { top: 6px; left: 6px; border-right: none; border-bottom: none; }
 .hud::after  { bottom: 6px; right: 6px; border-left: none; border-top: none; }
-
 .hud-row {
   display: grid;
   grid-template-columns: auto 1.4fr auto auto auto;
   gap: var(--space-5);
   align-items: center;
 }
+.hud-cell { min-width: 0; }
 .hud-cell-right { justify-self: end; text-align: right; }
 .hud-grow { min-width: 220px; }
 .hud-label {
   font-family: var(--display);
-  font-size: 10.5px;
+  font-size: var(--font-size-xs);
   letter-spacing: 0.18em;
-  color: var(--muted);
+  color: var(--color-text-secondary);
   text-transform: uppercase;
   margin-bottom: 4px;
 }
 .hud-value {
   font-family: var(--display);
-  font-size: 22px;
-  color: var(--text);
+  font-size: var(--font-size-xl);
+  color: var(--color-text-primary);
 }
-.hud-value .hud-sub { font-size: 13px; color: var(--muted); margin-left: 4px; }
+.hud-value .hud-sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-left: 4px; }
 .hud-meta { margin-top: var(--space-3); display: flex; gap: var(--space-2); }
-
 .hud-pill {
   font-family: var(--body);
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   letter-spacing: 0.06em;
   padding: 3px 10px;
   border-radius: 999px;
-  border: 1px solid var(--border-2);
-  background: var(--bg-2);
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-background-elevated);
   text-transform: uppercase;
 }
-.hud-pill-mint   { color: var(--mint);    border-color: oklch(50% 0.10 165); }
-.hud-pill-amber  { color: var(--amber);   border-color: oklch(50% 0.10  75); }
-.hud-pill-danger { color: var(--crimson); border-color: oklch(50% 0.12  22); }
-.hud-pill-muted  { color: var(--muted); }
+.hud-pill-mint   { color: var(--color-success); border-color: color-mix(in oklch, var(--color-success) 58%, var(--color-border)); }
+.hud-pill-amber  { color: var(--color-warning); border-color: color-mix(in oklch, var(--color-warning) 58%, var(--color-border)); }
+.hud-pill-danger { color: var(--color-danger);  border-color: color-mix(in oklch, var(--color-danger) 58%, var(--color-border)); }
+.hud-pill-muted  { color: var(--color-text-secondary); }
 
 /* XP bar */
 .xpbar {
   width: 100%;
   height: 12px;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
+  background: var(--color-background-elevated);
+  border: 1px solid var(--color-border);
   border-radius: 6px;
   overflow: hidden;
   margin-top: 4px;
@@ -832,8 +879,8 @@ _SPACE_CSS = """
   height: 100%;
   background: repeating-linear-gradient(
     90deg,
-    var(--amber) 0 8px,
-    var(--amber-2) 8px 16px
+    var(--color-primary) 0 8px,
+    var(--color-primary-strong) 8px 16px
   );
   transition: width 600ms cubic-bezier(0.22, 1, 0.36, 1);
 }
@@ -844,23 +891,23 @@ _SPACE_CSS = """
   align-items: center;
   gap: 8px;
   font-family: var(--display);
-  font-size: 16px;
+  font-size: var(--font-size-md);
   padding: 4px 10px;
-  border: 1px solid var(--border-2);
+  border: 1px solid var(--color-border-strong);
   border-radius: 8px;
-  background: var(--bg-2);
+  background: var(--color-background-elevated);
 }
 .prod-dot {
   width: 10px; height: 10px; border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--bg-2);
+  box-shadow: 0 0 0 2px var(--color-background-elevated);
 }
-.prod-pct { font-size: 12px; color: var(--muted); }
-.prod-ok      { color: var(--mint);    border-color: oklch(50% 0.10 165); }
-.prod-ok      .prod-dot { background: var(--mint); animation: pulse 2.4s infinite; }
-.prod-warn    { color: var(--amber);   border-color: oklch(50% 0.10  75); }
-.prod-warn    .prod-dot { background: var(--amber); animation: pulse 1.6s infinite; }
-.prod-danger  { color: var(--crimson); border-color: oklch(50% 0.12  22); }
-.prod-danger  .prod-dot { background: var(--crimson); animation: pulse 0.8s infinite; }
+.prod-pct { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
+.prod-ok      { color: var(--color-success); border-color: color-mix(in oklch, var(--color-success) 58%, var(--color-border)); }
+.prod-ok      .prod-dot { background: var(--color-success); animation: pulse 2.4s infinite; }
+.prod-warn    { color: var(--color-warning); border-color: color-mix(in oklch, var(--color-warning) 58%, var(--color-border)); }
+.prod-warn    .prod-dot { background: var(--color-warning); animation: pulse 1.6s infinite; }
+.prod-danger  { color: var(--color-danger); border-color: color-mix(in oklch, var(--color-danger) 58%, var(--color-border)); }
+.prod-danger  .prod-dot { background: var(--color-danger); animation: pulse 0.8s infinite; }
 
 @keyframes pulse {
   0%,100% { opacity: 1; transform: scale(1); }
@@ -874,38 +921,40 @@ _SPACE_CSS = """
   gap: var(--space-3);
   align-items: center;
   padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--surface);
-  font-size: 13px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
 }
 .mission-tag {
   font-family: var(--display);
   letter-spacing: 0.18em;
-  font-size: 11px;
+  font-size: var(--font-size-xs);
   padding: 4px 10px;
   border-radius: 6px;
-  background: var(--amber);
-  color: oklch(20% 0.02 250);
+  background: var(--color-primary);
+  color: var(--color-primary-on);
 }
-.mission-error .mission-tag, .mission-error { color: var(--crimson); border-color: oklch(45% 0.12 22); }
-.mission-warn  .mission-tag { background: var(--amber); }
-.mission-error .mission-tag { background: var(--crimson); color: var(--text); }
-.mission-id code { color: var(--amber); font-family: var(--code); font-size: 12px; }
-.mission-meta { color: var(--muted); }
+.mission-error { color: var(--color-danger); border-color: color-mix(in oklch, var(--color-danger) 62%, var(--color-border)); }
+.mission-warn  { color: var(--color-warning); border-color: color-mix(in oklch, var(--color-warning) 62%, var(--color-border)); }
+.mission-error .mission-tag { background: var(--color-danger); color: var(--color-primary-on); }
+.mission-warn .mission-tag { background: var(--color-warning); color: oklch(22% 0.02 250); }
+.mission-id code { color: var(--color-primary); font-family: var(--code); font-size: var(--font-size-xs); }
+.mission-meta { color: var(--color-text-secondary); }
 
 /* ── Status banner (mission report) ────────────────── */
 .banner {
-  border: 1px solid var(--border-2);
-  border-radius: 14px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5);
-  background: var(--surface);
+  background: var(--color-surface);
   position: relative;
 }
-.banner-ok      { border-color: oklch(50% 0.10 165); box-shadow: 0 0 0 1px oklch(50% 0.10 165) inset; }
-.banner-danger  { border-color: oklch(50% 0.12  22); box-shadow: 0 0 0 1px oklch(50% 0.12  22) inset; }
-.banner-warn    { border-color: oklch(50% 0.10  75); box-shadow: 0 0 0 1px oklch(50% 0.10  75) inset; }
-.banner-muted   { border-color: var(--border); }
+.banner-ok      { border-color: color-mix(in oklch, var(--color-success) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-success) 35%, transparent) inset; }
+.banner-danger  { border-color: color-mix(in oklch, var(--color-danger) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-danger) 35%, transparent) inset; }
+.banner-warn    { border-color: color-mix(in oklch, var(--color-warning) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-warning) 35%, transparent) inset; }
+.banner-muted   { border-color: var(--color-border); }
 .banner-head {
   display: flex; align-items: center; justify-content: space-between;
   margin-bottom: var(--space-2);
@@ -913,86 +962,86 @@ _SPACE_CSS = """
 .banner-badge {
   font-family: var(--display);
   letter-spacing: 0.18em;
-  font-size: 14px;
+  font-size: var(--font-size-sm);
 }
-.banner-ok    .banner-badge { color: var(--mint); }
-.banner-warn  .banner-badge { color: var(--amber); }
-.banner-danger .banner-badge { color: var(--crimson); }
-.banner-muted .banner-badge { color: var(--muted); }
+.banner-ok    .banner-badge { color: var(--color-success); }
+.banner-warn  .banner-badge { color: var(--color-warning); }
+.banner-danger .banner-badge { color: var(--color-danger); }
+.banner-muted .banner-badge { color: var(--color-text-secondary); }
 .banner-xp {
   font-family: var(--display);
-  font-size: 24px;
-  color: var(--amber);
+  font-size: var(--font-size-xl);
+  color: var(--color-primary);
 }
-.banner-prod { color: var(--text); margin-bottom: var(--space-3); }
+.banner-prod { color: var(--color-text-primary); margin-bottom: var(--space-3); }
 .banner-stats {
   display: flex; gap: var(--space-5);
-  font-family: var(--code); font-size: 13px;
+  font-family: var(--code); font-size: var(--font-size-sm);
   padding: var(--space-2) 0; margin-bottom: var(--space-2);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
 }
 .banner-stats em { font-style: normal; }
-.banner-stats em.ok      { color: var(--mint); }
-.banner-stats em.danger  { color: var(--crimson); }
-.banner-stats .stat-key  { color: var(--muted); margin-right: 4px; text-transform: uppercase; font-size: 11px; }
-.banner-line { font-size: 13.5px; margin-top: 6px; }
-.banner-line.muted { color: var(--muted); }
-.banner-foot { margin-top: var(--space-3); font-size: 11px; color: var(--dim); }
-.banner-foot code { color: var(--amber); }
+.banner-stats em.ok      { color: var(--color-success); }
+.banner-stats em.danger  { color: var(--color-danger); }
+.banner-stats .stat-key  { color: var(--color-text-secondary); margin-right: 4px; text-transform: uppercase; font-size: var(--font-size-xs); }
+.banner-line { font-size: var(--font-size-sm); margin-top: 6px; color: var(--color-text-primary); }
+.banner-line.muted { color: var(--color-text-secondary); }
+.banner-foot { margin-top: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
+.banner-foot code { color: var(--color-primary); }
 
 /* ── Generic side cards (brain, cascade) ──────────── */
 .hud-card {
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
   margin-bottom: var(--space-3);
   overflow: hidden;
 }
 .hud-card-title {
   font-family: var(--display);
   letter-spacing: 0.16em;
-  font-size: 11px;
-  color: var(--muted);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
   padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-2);
+  border-bottom: 1px solid var(--color-border);
+  background: var(--color-background-elevated);
 }
-.hud-card-body { padding: var(--space-3) var(--space-4); font-size: 13px; }
-.hud-card-ok      .hud-card-title { color: var(--mint); }
-.hud-card-warn    .hud-card-title { color: var(--amber); }
-.hud-card-danger  .hud-card-title { color: var(--crimson); }
-.hud-card-muted   .hud-card-title { color: var(--dim); }
+.hud-card-body { padding: var(--space-3) var(--space-4); font-size: var(--font-size-sm); color: var(--color-text-primary); }
+.hud-card-ok      .hud-card-title { color: var(--color-success); }
+.hud-card-warn    .hud-card-title { color: var(--color-warning); }
+.hud-card-danger  .hud-card-title { color: var(--color-danger); }
+.hud-card-muted   .hud-card-title { color: var(--color-text-tertiary); }
 
-.brain-meta { color: var(--muted); font-size: 12px; margin-bottom: var(--space-2); }
+.brain-meta { color: var(--color-text-secondary); font-size: var(--font-size-xs); margin-bottom: var(--space-2); }
 .brain-grid { display: grid; gap: 4px; }
-.brain-row { display: grid; grid-template-columns: 90px 1fr 50px; align-items: center; gap: var(--space-3); font-family: var(--code); font-size: 12.5px; }
-.brain-mode { color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; font-size: 11px; }
-.brain-bar  { color: var(--amber); }
-.brain-pct  { color: var(--text); text-align: right; }
+.brain-row { display: grid; grid-template-columns: 90px 1fr 50px; align-items: center; gap: var(--space-3); font-family: var(--code); font-size: var(--font-size-sm); }
+.brain-mode { color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--font-size-xs); }
+.brain-bar  { color: var(--color-primary); }
+.brain-pct  { color: var(--color-text-primary); text-align: right; }
 
 /* Cascade rows */
-.cascade-help { color: var(--muted); font-size: 12px; margin-bottom: var(--space-3); }
+.cascade-help { color: var(--color-text-secondary); font-size: var(--font-size-xs); margin-bottom: var(--space-3); }
 .cascade-row {
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   padding: var(--space-2) var(--space-3);
   margin-top: var(--space-2);
-  background: var(--bg-2);
+  background: var(--color-background-elevated);
 }
-.cascade-ok     { border-color: oklch(40% 0.08 165); }
-.cascade-warn   { border-color: oklch(40% 0.08  75); }
-.cascade-danger { border-color: oklch(40% 0.10  22); }
+.cascade-ok     { border-color: color-mix(in oklch, var(--color-success) 62%, var(--color-border)); }
+.cascade-warn   { border-color: color-mix(in oklch, var(--color-warning) 62%, var(--color-border)); }
+.cascade-danger { border-color: color-mix(in oklch, var(--color-danger) 62%, var(--color-border)); }
 .cascade-meta {
-  font-family: var(--display); font-size: 10.5px; letter-spacing: 0.16em;
-  color: var(--muted); display: flex; justify-content: space-between;
+  font-family: var(--display); font-size: var(--font-size-xs); letter-spacing: 0.16em;
+  color: var(--color-text-secondary); display: flex; justify-content: space-between;
   text-transform: uppercase;
 }
-.cascade-ok     .cascade-depth { color: var(--mint); }
-.cascade-warn   .cascade-depth { color: var(--amber); }
-.cascade-danger .cascade-depth { color: var(--crimson); }
-.cascade-chain { font-family: var(--code); font-size: 12.5px; margin-top: 4px; }
-.cascade-arrow { color: var(--dim); margin: 0 4px; }
+.cascade-ok     .cascade-depth { color: var(--color-success); }
+.cascade-warn   .cascade-depth { color: var(--color-warning); }
+.cascade-danger .cascade-depth { color: var(--color-danger); }
+.cascade-chain { font-family: var(--code); font-size: var(--font-size-sm); margin-top: 4px; color: var(--color-text-primary); }
+.cascade-arrow { color: var(--color-text-tertiary); margin: 0 4px; }
 
 /* ── Loadout buttons block ───────────────────────────── */
 .loadouts {
@@ -1000,66 +1049,82 @@ _SPACE_CSS = """
   margin: var(--space-2) 0;
 }
 .loadout-card {
-  border: 1px solid var(--border);
-  border-radius: 10px; padding: var(--space-3);
-  background: var(--bg-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm); padding: var(--space-3);
+  background: var(--color-background-elevated);
 }
-.loadout-title { font-family: var(--display); font-size: 12px; letter-spacing: 0.14em; color: var(--muted); }
-.loadout-name  { font-size: 14px; font-weight: 600; margin-top: 2px; }
-.loadout-stats { font-family: var(--code); font-size: 11px; color: var(--muted); margin-top: 4px; }
+.loadout-title { font-family: var(--display); font-size: var(--font-size-xs); letter-spacing: 0.14em; color: var(--color-text-secondary); }
+.loadout-name  { font-size: var(--font-size-sm); font-weight: 600; margin-top: 2px; color: var(--color-text-primary); }
+.loadout-stats { font-family: var(--code); font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: 4px; }
 
 /* ── Leaderboard tiles ──────────────────────────────── */
 .tiles { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-3) 0; }
 .tile {
   flex: 1 1 200px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
   padding: var(--space-3) var(--space-4);
 }
 .tile-title {
-  font-family: var(--display); font-size: 10.5px; letter-spacing: 0.16em;
-  color: var(--muted); text-transform: uppercase;
+  font-family: var(--display); font-size: var(--font-size-xs); letter-spacing: 0.16em;
+  color: var(--color-text-secondary); text-transform: uppercase;
 }
 .tile-row { display: flex; gap: var(--space-4); margin-top: var(--space-2); }
-.tile-key { display: block; font-size: 10.5px; color: var(--dim); text-transform: uppercase; letter-spacing: 0.10em; }
-.tile-val { font-family: var(--display); font-size: 18px; color: var(--text); }
-.tile-delta { font-family: var(--code); font-size: 12.5px; margin-top: 6px; }
-.tile-ok     { box-shadow: 0 0 0 1px oklch(45% 0.10 165) inset; }
-.tile-ok     .tile-delta { color: var(--mint); }
-.tile-danger { box-shadow: 0 0 0 1px oklch(45% 0.12 22) inset; }
-.tile-danger .tile-delta { color: var(--crimson); }
-.tile-muted  .tile-delta { color: var(--muted); }
+.tile-key { display: block; font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.10em; }
+.tile-val { font-family: var(--display); font-size: var(--font-size-lg); color: var(--color-text-primary); }
+.tile-delta { font-family: var(--code); font-size: var(--font-size-sm); margin-top: 6px; }
+.tile-ok     { box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-success) 36%, transparent) inset; }
+.tile-ok     .tile-delta { color: var(--color-success); }
+.tile-danger { box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-danger) 36%, transparent) inset; }
+.tile-danger .tile-delta { color: var(--color-danger); }
+.tile-muted  .tile-delta { color: var(--color-text-secondary); }
 
 /* Help cards */
 .help-card {
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
   padding: var(--space-3) var(--space-4);
-  background: var(--bg-2);
-  font-size: 13px;
-  color: var(--muted);
+  background: var(--color-background-elevated);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
 }
-.help-card b, .help-card code { color: var(--text); }
+.help-card b, .help-card code { color: var(--color-text-primary); }
+.help-card + .help-card { margin-top: var(--space-2); }
 
 /* H1 / page title */
+.app-header {
+  margin-bottom: var(--space-4);
+}
 .page-title {
   font-family: var(--display);
   letter-spacing: 0.20em;
-  font-size: clamp(28px, 4vw, 44px);
-  color: var(--text);
+  font-size: var(--font-size-2xl);
+  color: var(--color-text-primary);
   margin: 0;
 }
 .page-sub {
-  color: var(--muted); font-size: 14px; margin-top: 4px;
+  color: var(--color-text-secondary); font-size: var(--font-size-md); margin-top: 4px;
   max-width: 70ch;
 }
 
 /* DataFrames */
 .gradio-container .table-wrap, .gradio-container .gr-dataframe {
-  background: var(--surface) !important;
-  border: 1px solid var(--border) !important;
+  background: var(--color-surface) !important;
+  border: 1px solid var(--color-border) !important;
   border-radius: 10px !important;
+}
+.leaderboard-head { margin-bottom: var(--space-2); }
+.chart-container .plotly .xtick text,
+.chart-container .plotly .ytick text,
+.chart-container .plotly .legendtext {
+  fill: var(--color-text-secondary) !important;
+}
+
+@media (max-width: 980px) {
+  .hud-row { grid-template-columns: 1fr 1fr; gap: var(--space-3); }
+  .hud-cell-right { justify-self: stretch; text-align: left; }
+  .loadouts { grid-template-columns: 1fr; }
 }
 """
 
@@ -1084,10 +1149,12 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
 
     # ── Top HUD ────────────────────────────────────────────────────────────
     gr.HTML(
+        "<header class='app-header'>"
         "<h1 class='page-title'>BUG · BOUNTY · ARENA</h1>"
         "<p class='page-sub'>An adversary mutates the codebase. A PR ships referencing the <em>old world</em>. "
         "Tests crash. Your reviewer agent has one shot to <b>find the bug, name it, and trace the failure path</b> "
         "— or production goes down for real.</p>"
+        "</header>"
     )
 
     env_state    = gr.State(None)
@@ -1137,10 +1204,10 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
 
                 with gr.Column(scale=2):
                     status = gr.HTML(
-                        "<div class='mission-strip'>"
+                        "<section class='mission-strip' role='status' aria-live='polite'>"
                         "<span class='mission-tag'>READY</span>"
                         "<span class='mission-meta'>Press <b>Deploy Mission</b> to spawn a bug.</span>"
-                        "</div>"
+                        "</section>"
                     )
 
             with gr.Row():
@@ -1292,9 +1359,9 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
                     + "</div>"
                 )
                 header = (
-                    f"<div class='help-card' style='margin-bottom:8px'>"
+                    f"<section class='help-card leaderboard-head'>"
                     f"<b>{n} missions</b> · level={diff_lvl} · adversary={persona}"
-                    f"</div>"
+                    f"</section>"
                 )
                 pattern_rows = [
                     {"drift_type": dt, "policy": pol, "reward": round(sum(vs) / len(vs), 3)}
