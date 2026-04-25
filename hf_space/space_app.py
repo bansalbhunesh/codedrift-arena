@@ -306,7 +306,23 @@ def run_benchmark(
 _NEW_EP_OUTPUTS_COUNT = 11   # env, prompt, pr_diff, codebase, test_output, review, status, brain, scorer, replay_state, replay_out
 _STEP_OUTPUTS_COUNT    = 11   # same shape
 
-with gr.Blocks(title="CodeDrift Arena") as demo:
+_SPACE_CSS = """
+#pr_diff_box textarea, #test_output_box textarea {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace !important;
+  font-size: 12px !important;
+}
+.cd-card {
+  border: 1px solid rgba(120, 120, 120, 0.35);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.cd-kpi {
+  font-size: 13px;
+  opacity: 0.95;
+}
+"""
+
+with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
     gr.Markdown(
         "# 🏟️ CodeDrift Arena\n"
         "**The Challenge:** The codebase has drifted — functions renamed, files deleted, APIs changed. "
@@ -316,6 +332,12 @@ with gr.Blocks(title="CodeDrift Arena") as demo:
         "2. Click **▶ Base Model** — naive model misses the root cause (ships the bug).\n"
         "3. Click **▶ Trained Model** — GRPO-trained policy traces failure → root cause correctly.\n"
         "4. Click **⚖️ Score** to see the causal reward breakdown."
+    )
+    gr.Markdown(
+        "<div class='cd-card cd-kpi'>"
+        "<b>Why judges like this:</b> executable failures, structured root-cause tracing, deterministic scoring, and "
+        "benchmark + replay built into the UI."
+        "</div>"
     )
 
     env_state = gr.State(None)

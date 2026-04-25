@@ -1,3 +1,14 @@
+---
+title: CodeDrift
+emoji: 🧠
+colorFrom: blue
+colorTo: purple
+sdk: gradio
+python_version: "3.11"
+app_file: app.py
+pinned: false
+---
+
 # CodeDrift Arena
 
 **Train a code reviewer under live schema drift.** A frozen adversary mutates the synthetic repo (renames, deletions, API contract changes). The reviewer sees the **current** codebase plus a **PR diff** that may still reference the old world. A **deterministic scorer** turns the review into a GRPO-ready reward—no human labels per step.
