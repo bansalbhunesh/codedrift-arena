@@ -17,9 +17,23 @@ if str(ROOT) not in sys.path:
 
 
 class TestServerSecurity(unittest.TestCase):
-    def _load_app(self):
+    @staticmethod
+    def _reset_server_module():
+        # Prometheus REGISTRY is a process-wide singleton; metrics defined at
+        # module scope in server.app stay registered after sys.modules.pop and
+        # raise "Duplicated timeseries" on the next import. Unregister all
+        # collectors so the reimport starts from a clean slate.
         if "server.app" in sys.modules:
             del sys.modules["server.app"]
+        from prometheus_client import REGISTRY
+        for collector in list(REGISTRY._collector_to_names):
+            try:
+                REGISTRY.unregister(collector)
+            except KeyError:
+                pass
+
+    def _load_app(self):
+        self._reset_server_module()
         mod = importlib.import_module("server.app")
         return mod.app
 
@@ -77,8 +91,7 @@ class TestServerSecurity(unittest.TestCase):
         os.environ["CODEDRIFT_REQUIRE_AUTH"] = "1"
         os.environ["CODEDRIFT_API_TOKEN"] = ""
         try:
-            if "server.app" in sys.modules:
-                del sys.modules["server.app"]
+            self._reset_server_module()
             with self.assertRaises(SystemExit):
                 importlib.import_module("server.app")
         finally:
