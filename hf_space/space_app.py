@@ -1072,15 +1072,13 @@ _STEP_OUTPUTS_COUNT   = 13
 
 # ─── UI ─────────────────────────────────────────────────────────────────────
 
-_BLOCKS_KWARGS: dict[str, Any] = {"title": "Bug Bounty Arena · CodeDrift"}
-try:
-    # Gradio < 6.0 accepts theme/css on Blocks; Gradio >= 6.0 wants them on launch().
-    _gr_major = int(str(getattr(gr, "__version__", "5.0.0")).split(".", 1)[0])
-except Exception:
-    _gr_major = 5
-if _gr_major < 6:
-    _BLOCKS_KWARGS["theme"] = gr.themes.Base()
-    _BLOCKS_KWARGS["css"] = _SPACE_CSS
+_BLOCKS_KWARGS: dict[str, Any] = {
+    "title": "Bug Bounty Arena · CodeDrift",
+    # Keep css/theme on Blocks so Hugging Face Spaces (which imports `demo`
+    # instead of running __main__) always receives the styling.
+    "theme": gr.themes.Base(),
+    "css": _SPACE_CSS,
+}
 
 with gr.Blocks(**_BLOCKS_KWARGS) as demo:
 
@@ -1493,7 +1491,4 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
 
 
 if __name__ == "__main__":
-    if _gr_major >= 6:
-        demo.launch(theme=gr.themes.Base(), css=_SPACE_CSS)
-    else:
-        demo.launch()
+    demo.launch()
