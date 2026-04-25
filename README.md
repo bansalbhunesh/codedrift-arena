@@ -67,11 +67,36 @@ After enough rounds, the policy gets **better at causal debugging**, not at memo
 
 ---
 
-## Primary track (for judges): Theme **#3.1 — World Modeling (Professional Tasks)**
+## What this environment actually trains
 
-**This submission is positioned as a professional-task world model:** the agent must maintain a coherent picture of a **dynamic codebase**, use a **real execution oracle** (failing tests), and **ground** its review in **causal structure** (what broke, where, and why)—not in surface style or memorized approvals. The environment is **partially observable** (the reviewer sees diff + test output + current tree, not an omniscient label), and **rewards** reward **correct beliefs** about stale references and failure paths. That is the core of **world modeling for software engineering**, not chat or personalization.
+These are the **specific, measurable capabilities** a model gains from repeated episodes in this environment:
 
-*Secondary angle (one line):* **#4 Self-improvement** shows up in the **adaptive** adversary and curriculum (the world **reacts** when the reviewer gets stronger)—but the **primary** story for evaluation is **#3.1**.
+| Capability | What the model learns |
+|---|---|
+| **Stale reference detection** | Spot the exact symbol (function, module, call signature) that no longer exists — even when the PR looks syntactically valid |
+| **Causal failure path tracing** | Trace backwards from test failure → intermediate caller → stale symbol (dependency-aware reasoning, not keyword search) |
+| **Error type identification** | Rename → `AttributeError`, removal → `ModuleNotFoundError`, contract → `TypeError`, null → `NoneType`, etc. |
+| **Verdict calibration** | APPROVE when there is no bug, REQUEST_CHANGES when there is — the model must discriminate, not always block |
+| **Confidence calibration** | Overconfident wrong answers are penalized; the model learns to express belief accurately |
+| **Anti-hallucination** | Citing a symbol that doesn't appear in the diff or codebase costs reward |
+| **Completeness** | Catching all stale refs in a multi-mutation episode, not just the first one |
+
+**What this does NOT train:** style linting, formatting preferences, test coverage advice, or anything that doesn't have an executable ground truth.
+
+---
+
+## Theme fit (for judges)
+
+| Theme | Fit | Why |
+|---|---|---|
+| **#4 — Self-Improvement** | **~45%** | Adaptive adversary tracks reviewer win rate and escalates. Curriculum drives its own challenge level. The generator gets harder as the model gets better — recursive amplification. |
+| **#3.1 — World Modeling (Professional Tasks)** | **~40%** | Real execution oracle (pytest), partially observable world (reviewer sees diff + tests, not the mutation), causal reward grounded in runtime facts, not human labels. |
+| **#5 — Wild Card** | **~10%** | Executable ground truth for code review with no human labels anywhere in the reward loop is a genuinely novel training signal. |
+| **#1 — Multi-Agent** | **~5%** | Generator vs Reviewer is adversarial, but the multi-agent interaction is implicit rather than the primary training story. |
+
+**Primary submission: Theme #4 (Self-Improvement)** — the environment *adapts to the model* and drives recursive capability growth in causal code debugging. The adaptive adversary is the mechanism; the capability grown is professional-grade code review reasoning.
+
+> Full technical write-up: [`BLOG.md`](BLOG.md)
 
 ---
 
