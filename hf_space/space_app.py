@@ -1,21 +1,14 @@
-"""Gradio UI for Hugging Face Spaces — Bug Bounty Arena.
+"""Gradio UI for Hugging Face Spaces — CodeDrift Arena.
 
-A mission-control / arcade-HUD reskin of the CodeDrift environment. Judges can:
-    - deploy a mission (env reset),
-    - draft a review (or load Junior / Senior loadouts),
-    - submit and see XP / streak / production-health update,
-    - play the Junior-vs-Senior leaderboard, and
-    - hunt bugs in real GitHub PRs (multi-language, URL fetch).
-
-Visual + motion: token-based light/dark theme, two display faces (Major Mono
-Display + Chakra Petch), and purposeful CSS-only motion (HUD breathing, scanlines,
-panel entrances) with reduced-motion off switch. No gradient text, no
-decorative left stripe borders.
+Production-style dashboard: design tokens, max-width layout, two-column
+missions (controls vs outputs), and WCAG-friendly contrast. Same behavior as
+before: episode reset, review scoring, benchmark, real-PR heuristics.
 """
 
 from __future__ import annotations
 
 import json
+from pathlib import Path
 from typing import Any
 
 import gradio as gr
@@ -74,7 +67,6 @@ def _level_for(xp: int) -> tuple[int, int, int]:
 def _hud_html(player: dict[str, Any]) -> str:
     """Top mission-control HUD: callsign · level · XP bar · streak · production."""
     lvl, into, step = _level_for(int(player.get("total_xp", 0)))
-    pct = into / step
     streak = int(player.get("current_streak", 0))
     best = int(player.get("best_streak", 0))
     played = int(player.get("missions_played", 0))
@@ -93,49 +85,51 @@ def _hud_html(player: dict[str, Any]) -> str:
         else "warn" if health >= 40
         else "danger"
     )
-    streak_pill = (
-        f"<span class='hud-pill hud-pill-mint'>★ {streak} streak · best {best}</span>"
+    xp_pct = 100.0 * into / max(1, step)
+    streak_html = (
+        f"<span class='ds-pill ds-pill--ok'>{streak} win streak · best {best}</span>"
         if streak >= 2
-        else f"<span class='hud-pill hud-pill-muted'>streak {streak} · best {best}</span>"
+        else f"<span class='ds-pill'>{streak} streak · best {best}</span>"
     )
     last_pill = ""
     if last == "success":
-        last_pill = "<span class='hud-pill hud-pill-mint'>last: BUG DEFUSED</span>"
+        last_pill = "<span class='ds-pill ds-pill--ok'>Last: caught</span>"
     elif last == "failure":
-        last_pill = "<span class='hud-pill hud-pill-danger'>last: PROD DOWN</span>"
+        last_pill = "<span class='ds-pill ds-pill--danger'>Last: missed</span>"
     elif last == "partial":
-        last_pill = "<span class='hud-pill hud-pill-amber'>last: PARTIAL</span>"
+        last_pill = "<span class='ds-pill ds-pill--warn'>Last: partial</span>"
 
     return f"""
-<section class="hud hud-ambient" aria-label="Mission HUD">
-  <div class="hud-orbit" aria-hidden="true"></div>
-  <div class="hud-row">
-    <div class="hud-cell">
-      <div class="hud-label">CALLSIGN</div>
-      <div class="hud-value">{player.get("callsign", "AGENT-001")}</div>
+<section class="ds-hud" aria-label="Run overview">
+  <div class="ds-hud__kpis">
+    <div>
+      <p class="ds-caption">Callsign</p>
+      <p class="ds-h3--kpi">{player.get("callsign", "AGENT-001")}</p>
     </div>
-    <div class="hud-cell hud-grow">
-      <div class="hud-label">LVL {lvl} · {int(player.get("total_xp", 0))} XP · {into}/{step} to next</div>
-      <div class="xpbar"><div class="xpbar-fill" style="width:{pct * 100:.1f}%"></div></div>
+    <div>
+      <p class="ds-caption">Level & XP</p>
+      <p class="ds-h3--kpi">L{lvl} · {int(player.get("total_xp", 0))} XP</p>
     </div>
-    <div class="hud-cell">
-      <div class="hud-label">MISSIONS</div>
-      <div class="hud-value">{won}<span class="hud-sub">/{played}</span></div>
+    <div>
+      <p class="ds-caption">Missions won</p>
+      <p class="ds-h3--kpi">{won}<span class="ds-kpi-suffix">/ {played}</span></p>
     </div>
-    <div class="hud-cell">
-      <div class="hud-label">STREAK</div>
-      <div class="hud-value">{streak_pill}</div>
+    <div>
+      <p class="ds-caption">Streak</p>
+      <div>{streak_html}</div>
     </div>
-    <div class="hud-cell hud-cell-right">
-      <div class="hud-label">PRODUCTION</div>
-      <div class="prod prod-{health_class}">
-        <span class="prod-dot"></span>
-        <span class="prod-text">{health_label}</span>
-        <span class="prod-pct">{health}%</span>
-      </div>
+    <div>
+      <p class="ds-caption">Production</p>
+      <div class="ds-prod ds-prod--{health_class}"><span class="ds-prod-dot" aria-hidden="true"></span><span class="ds-prod-cnt">{health_label} · {health}%</span></div>
     </div>
   </div>
-  <div class="hud-meta" aria-live="polite">{last_pill}</div>
+  <div class="ds-hud__xp">
+    <p class="ds-caption">Next level — {into} / {step} XP in band</p>
+    <div class="ds-xpbar" style="--xp-pct: {xp_pct:.2f}" role="progressbar" aria-valuenow="{into}" aria-valuemin="0" aria-valuemax="{step}">
+      <div class="ds-xpbar-fill"></div>
+    </div>
+  </div>
+  <div class="ds-hud__meta" aria-live="polite">{last_pill}</div>
 </section>
 """.strip()
 
@@ -209,21 +203,21 @@ def _status_banner(reward: float, info: dict[str, Any]) -> str:
 
     xp_sign = f"+{xp}" if xp >= 0 else f"{xp}"
     return f"""
-<section class="banner banner-{tone} banner-anim" role="status" aria-live="polite">
-  <header class="banner-head">
-    <span class="banner-badge">{icon} {label}</span>
-    <span class="banner-xp">{xp_sign} XP</span>
+<section class="ds-banner ds-banner--{tone}" role="status" aria-live="polite">
+  <header class="ds-banner__head">
+    <span class="ds-banner__label">{icon} {label}</span>
+    <span class="ds-banner__xp">{xp_sign} XP</span>
   </header>
-  <div class="banner-prod">{prod}</div>
-  <div class="banner-stats">
-    <span><span class="stat-key">bugs</span> {n_stale}</span>
-    <span><span class="stat-key">caught</span> <em class="ok">{caught_count}</em></span>
-    <span><span class="stat-key">missed</span> <em class="danger">{missed_count}</em></span>
+  <div class="ds-banner__body">{prod}</div>
+  <div class="ds-banner__grid" aria-label="Scoring summary">
+    <span><span class="ds-stat__k">Stale refs</span> {n_stale}</span>
+    <span><span class="ds-stat__k">Caught</span> <em class="ds-ok">{caught_count}</em></span>
+    <span><span class="ds-stat__k">Missed</span> <em class="ds-bad">{missed_count}</em></span>
   </div>
-  {"<div class='banner-line'>" + summary + "</div>" if summary else ""}
-  {"<div class='banner-line muted'><b>Why it matters:</b> " + why + "</div>" if why else ""}
-  {"<div class='banner-line muted'>" + conf + "</div>" if conf else ""}
-  <footer class="banner-foot">mission-id <code>{ep}</code></footer>
+  {"<div class='ds-line'>" + summary + "</div>" if summary else ""}
+  {"<div class='ds-line ds-line--muted'><strong>Why it matters:</strong> " + why + "</div>" if why else ""}
+  {"<div class='ds-line ds-line--muted'>" + conf + "</div>" if conf else ""}
+  <footer class="ds-banner__foot">Mission <code>{ep}</code></footer>
 </section>
 """.strip()
 
@@ -233,18 +227,18 @@ def _status_banner(reward: float, info: dict[str, Any]) -> str:
 def _brain_html(env: CodeDriftEnv | None) -> str:
     if env is None:
         return (
-            "<div class='hud-card hud-card-muted'>"
-            "<div class='hud-card-title'>ADVERSARY BRAIN</div>"
-            "<div class='hud-card-body'>Deploy a mission to initialise.</div>"
-            "</div>"
+            "<section class='ds-card ds-card--muted' aria-label='Adversary brain'>"
+            "<h3 class='ds-card__title'>Adversary brain</h3>"
+            "<div class='ds-card__body'>Deploy a mission to initialise.</div>"
+            "</section>"
         )
     snap = env.drift_agent.adaptive_snapshot()
     if not snap.get("enabled"):
         return (
-            "<div class='hud-card hud-card-muted'>"
-            "<div class='hud-card-title'>ADVERSARY BRAIN</div>"
-            "<div class='hud-card-body'>Available in <code>adaptive</code> personality mode.</div>"
-            "</div>"
+            "<section class='ds-card ds-card--muted' aria-label='Adversary brain'>"
+            "<h3 class='ds-card__title'>Adversary brain</h3>"
+            "<div class='ds-card__body'>Available in <code>adaptive</code> personality mode.</div>"
+            "</section>"
         )
     stage = str(snap.get("stage", "random"))
     ep = int(snap.get("episodes_run", 0) or 0)
@@ -264,12 +258,12 @@ def _brain_html(env: CodeDriftEnv | None) -> str:
             f"</div>"
         )
     return (
-        f"<div class='hud-card hud-card-{tone}'>"
-        f"<div class='hud-card-title'>ADVERSARY BRAIN · STAGE {stage.upper()} · EP {ep}</div>"
-        f"<div class='hud-card-body'>"
-        f"<div class='brain-meta'>reviewer win-rate · 5={wr5:.0%} · 10={wr10:.0%} · 20={wr20:.0%}</div>"
-        f"<div class='brain-grid'>{''.join(rows)}</div>"
-        f"</div></div>"
+        f"<section class='ds-card ds-card--{tone}' aria-label='Adversary brain'>"
+        f"<h3 class='ds-card__title'>Brain · {stage.upper()} · ep {ep}</h3>"
+        f"<div class='ds-card__body'>"
+        f"<p class='brain-meta'>Reviewer win rate · 5={wr5:.0%} · 10={wr10:.0%} · 20={wr20:.0%}</p>"
+        f"<div>{''.join(rows)}</div>"
+        f"</div></section>"
     )
 
 
@@ -286,8 +280,8 @@ TRAINED_FALLBACK_RESPONSE = """VERDICT: REQUEST_CHANGES
 ROOT_CAUSE: <no active episode>
 FAILURE_PATH: n/a
 CONFIDENCE: 0.5
-ISSUES: Click 'Start Mission' first so the trained policy can analyze the actual diff.
-REASON: No episode loaded."""
+ISSUES: Deploy a mission first so the trained policy sees the real diff and stale refs.
+REASON: No active episode in memory."""
 
 
 def _trained_response_for(env: CodeDriftEnv | None) -> str:
@@ -364,10 +358,10 @@ def fill_trained_model(env: CodeDriftEnv | None) -> str:
 def _cascade_html(env: CodeDriftEnv | None) -> str:
     if env is None or not env.stale_actions:
         return (
-            "<div class='hud-card hud-card-muted'>"
-            "<div class='hud-card-title'>FAILURE CASCADE</div>"
-            "<div class='hud-card-body'>Deploy a mission to see how the test crash traces back to the bug.</div>"
-            "</div>"
+            "<section class='ds-card ds-card--muted' aria-label='Failure cascade'>"
+            "<h3 class='ds-card__title'>Failure cascade</h3>"
+            "<div class='ds-card__body'>Deploy a mission to see how the test links to the bug.</div>"
+            "</section>"
         )
     cascade = env.failure_cascade
     cascade_calls = list(getattr(cascade, "calls", []) or []) if cascade else []
@@ -400,13 +394,13 @@ def _cascade_html(env: CodeDriftEnv | None) -> str:
             f"</div>"
         )
     return (
-        "<div class='hud-card'>"
-        "<div class='hud-card-title'>FAILURE CASCADE</div>"
-        "<div class='hud-card-body'>"
-        "<div class='cascade-help'>Where the test crashes vs where the bug actually lives. "
-        "Depth ≥ 3 = <i>hidden cause</i> — the reviewer must trace it.</div>"
+        "<section class='ds-card' aria-label='Failure cascade'>"
+        "<h3 class='ds-card__title'>Failure cascade</h3>"
+        "<div class='ds-card__body'>"
+        "<p class='cascade-help'>Where the test crashes vs where the bug lives. "
+        "Depth ≥ 3 = <i>hidden cause</i> — the reviewer must trace it.</p>"
         + "".join(rows)
-        + "</div></div>"
+        + "</div></section>"
     )
 
 
@@ -458,11 +452,11 @@ def new_episode(
         env = CodeDriftEnv(difficulty=eff_difficulty, personality=eff_personality, seed=s)
         obs = env.reset()
         status = (
-            f"<section class='mission-strip mission-active' role='status' aria-live='polite'>"
-            f"<span class='mission-tag'>MISSION ACTIVE</span>"
-            f"<span class='mission-id'><code>{env.episode_id}</code></span>"
-            f"<span class='mission-meta'>mode <b>{scenario_mode}</b> · level <b>{eff_difficulty}</b> · adversary <b>{eff_personality}</b></span>"
-            f"<span class='mission-meta'>ground-truth bugs: <b>{obs.n_stale_refs}</b> (hidden)</span>"
+            f"<section class='ds-mission ds-mission--active' role='status' aria-live='polite'>"
+            f"<span class='ds-mission__tag'>Active</span>"
+            f"<span class='ds-mission__meta'><code>{env.episode_id}</code></span>"
+            f"<span class='ds-mission__meta'>Mode <b>{scenario_mode}</b> · level <b>{eff_difficulty}</b> · adversary <b>{eff_personality}</b></span>"
+            f"<span class='ds-mission__meta'>Hidden stale refs: <b>{obs.n_stale_refs}</b></span>"
             f"</section>"
         )
         return (
@@ -479,7 +473,7 @@ def new_episode(
         err = {"error": str(e), "type": type(e).__name__}
         return (
             None, "", "", "", "", "",
-            f"<section class='mission-strip mission-error' role='status' aria-live='polite'>FAILED TO START · {e!s}</section>",
+            f"<section class='ds-mission ds-mission--error' role='status' aria-live='polite'><span class='ds-mission__tag'>Error</span><span class='ds-mission__meta'>Failed to start — {e!s}</span></section>",
             _brain_html(None),
             _fmt_info(err),
             replay_events, _replay_md(replay_events),
@@ -498,7 +492,7 @@ def submit_review(
     if env is None:
         return (
             None, "", "", "", "", "",
-            "<section class='mission-strip mission-error' role='status' aria-live='polite'>NO ACTIVE MISSION · click <b>Deploy Mission</b></section>",
+            "<section class='ds-mission ds-mission--error' role='status' aria-live='polite'><span class='ds-mission__tag'>Idle</span><span class='ds-mission__meta'>No active mission — click <b>Deploy mission</b></span></section>",
             _brain_html(None),
             _fmt_info({"error": "no_env"}),
             replay_events, _replay_md(replay_events),
@@ -507,7 +501,7 @@ def submit_review(
     if not review.strip():
         return (
             env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-            "<section class='mission-strip mission-warn' role='status' aria-live='polite'>EMPTY REPORT · paste a non-empty review</section>",
+            "<section class='ds-mission ds-mission--warn' role='status' aria-live='polite'><span class='ds-mission__tag'>Review</span><span class='ds-mission__meta'>Empty report — paste a non-empty review</span></section>",
             _brain_html(env),
             _fmt_info({"error": "empty_review", "episode_id": env.episode_id}),
             replay_events, _replay_md(replay_events),
@@ -516,7 +510,7 @@ def submit_review(
     if not env.is_ready_for_step:
         return (
             env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-            "<section class='mission-strip mission-warn' role='status' aria-live='polite'>MISSION ALREADY SCORED · deploy a new mission</section>",
+            "<section class='ds-mission ds-mission--warn' role='status' aria-live='polite'><span class='ds-mission__tag'>Scored</span><span class='ds-mission__meta'>Mission already scored — deploy a new one</span></section>",
             _brain_html(env),
             _fmt_info({"error": "episode_already_scored"}),
             replay_events, _replay_md(replay_events),
@@ -547,7 +541,7 @@ def submit_review(
         err = {"error": str(e), "type": "RuntimeError", "env": snap}
         return (
             env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-            "<section class='mission-strip mission-warn' role='status' aria-live='polite'>ALREADY SCORED · deploy a new mission to continue</section>",
+            "<section class='ds-mission ds-mission--warn' role='status' aria-live='polite'><span class='ds-mission__tag'>Scored</span><span class='ds-mission__meta'>Already scored — deploy a new mission to continue</span></section>",
             _brain_html(env),
             _fmt_info(err),
             replay_events, _replay_md(replay_events),
@@ -558,7 +552,7 @@ def submit_review(
         err = {"error": str(e), "type": type(e).__name__, "env": snap}
         return (
             env, gr.update(), gr.update(), gr.update(), gr.update(), gr.update(),
-            f"<section class='mission-strip mission-error' role='status' aria-live='polite'>SCORING FAILED · {e!s}</section>",
+            f"<section class='ds-mission ds-mission--error' role='status' aria-live='polite'><span class='ds-mission__tag'>Error</span><span class='ds-mission__meta'>Scoring failed — {e!s}</span></section>",
             _brain_html(env),
             _fmt_info(err),
             replay_events, _replay_md(replay_events),
@@ -575,16 +569,16 @@ def reset_player(_player: dict[str, Any] | None) -> tuple[dict[str, Any], str]:
 
 def _metric_tile(title: str, base: float, trained: float, fmt: str = "{:+.3f}") -> str:
     delta = trained - base
-    tone = "ok" if delta > 1e-6 else "danger" if delta < -1e-6 else "muted"
+    tone = "ok" if delta > 1e-6 else "bad" if delta < -1e-6 else "mu"
     arrow = "▲" if delta > 0 else "▼" if delta < 0 else "▬"
     return (
-        f"<div class='tile tile-{tone}'>"
-        f"<div class='tile-title'>{title}</div>"
-        f"<div class='tile-row'>"
-        f"<div><span class='tile-key'>Junior</span><span class='tile-val'>{fmt.format(base)}</span></div>"
-        f"<div><span class='tile-key'>Senior</span><span class='tile-val'>{fmt.format(trained)}</span></div>"
+        f"<div class='ds-tile ds-tile--{tone}'>"
+        f"<div class='ds-tile__title'>{title}</div>"
+        f"<div class='ds-tile__row'>"
+        f"<div><span class='ds-tile__key'>Junior</span><br /><span class='ds-tile__val'>{fmt.format(base)}</span></div>"
+        f"<div><span class='ds-tile__key'>Senior</span><br /><span class='ds-tile__val'>{fmt.format(trained)}</span></div>"
         f"</div>"
-        f"<div class='tile-delta'>{arrow} {fmt.format(delta)}</div>"
+        f"<div class='ds-tile__d'>{arrow} {fmt.format(delta)}</div>"
         f"</div>"
     )
 
@@ -630,14 +624,14 @@ def run_benchmark(
     row_n = len(rows)
     win_pct = (win_count / row_n) if row_n else 0.0
     summary = (
-        "<section class='bench-report' role='status' aria-live='polite'>"
-        f"<h2 class='bench-report-title'>{row_n} missions · quick leaderboard</h2>"
-        "<p class='bench-report-row'>"
-        f"<span class='bench-pill'>{scenario_mode}</span>"
-        f"<span class='bench-pill'>{eff_difficulty}</span>"
-        f"<span class='bench-pill'>{eff_personality}</span>"
-        "</p>"
-        "<ul class='bench-report-list'>"
+        "<section class='ds-bench' role='status' aria-live='polite'>"
+        f"<h2 class='ds-bench__title'>{row_n} missions · quick run</h2>"
+        "<div class='ds-bench__row' aria-label='Scenario'>"
+        f"<span class='ds-bench-pill'>{scenario_mode}</span>"
+        f"<span class='ds-bench-pill'>{eff_difficulty}</span>"
+        f"<span class='ds-bench-pill'>{eff_personality}</span>"
+        "</div>"
+        "<ul>"
         f"<li>Junior avg reward: <strong>{base_avg:+.3f}</strong></li>"
         f"<li>Senior avg reward: <strong>{trained_avg:+.3f}</strong></li>"
         f"<li>Senior win rate: <strong>{win_pct:.0%}</strong> ({win_count}/{row_n})</li>"
@@ -652,725 +646,16 @@ def run_benchmark(
 
 # ─── CSS theme ──────────────────────────────────────────────────────────────
 
-_SPACE_CSS = """
-@import url('https://fonts.googleapis.com/css2?family=Major+Mono+Display&family=Chakra+Petch:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-:root {
-  color-scheme: light dark;
-  --color-background: oklch(98% 0.01 250);
-  --color-background-elevated: oklch(96% 0.015 250);
-  --color-surface: oklch(100% 0 0);
-  --color-surface-2: oklch(97% 0.013 250);
-  --color-border: oklch(84% 0.02 250);
-  --color-border-strong: oklch(72% 0.03 250);
-  --color-text-primary: oklch(25% 0.02 250);
-  --color-text-secondary: oklch(40% 0.02 250);
-  --color-text-tertiary: oklch(52% 0.02 250);
-  --color-primary: oklch(56% 0.18 260);
-  --color-primary-strong: oklch(46% 0.20 260);
-  --color-primary-on: oklch(99% 0.01 250);
-  --color-success: oklch(55% 0.16 160);
-  --color-warning: oklch(72% 0.17 80);
-  --color-danger: oklch(56% 0.21 24);
-  --color-focus: oklch(64% 0.18 255);
-  --color-chart-junior: oklch(58% 0.15 30);
-  --color-chart-senior: oklch(56% 0.16 160);
+def _load_space_css() -> str:
+    css_path = Path(__file__).resolve().parent / "theme.css"
+    try:
+        return css_path.read_text(encoding="utf-8")
+    except OSError:
+        return "/* theme.css missing */ .gradio-container { min-height: 100vh; }"
 
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.5rem;
-  --space-6: 2rem;
-  --space-7: 3rem;
-  --radius-sm: 0.5rem;
-  --radius-md: 0.75rem;
-  --radius-lg: 1rem;
-  --font-size-xs: 0.75rem;
-  --font-size-sm: 0.875rem;
-  --font-size-md: 1rem;
-  --font-size-lg: 1.125rem;
-  --font-size-xl: 1.5rem;
-  --font-size-2xl: clamp(1.75rem, 2.5vw, 2.5rem);
-  --display: 'Major Mono Display', ui-monospace, monospace;
-  --body:    'Chakra Petch', ui-sans-serif, system-ui, sans-serif;
-  --code:    'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
-  --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
-  --dur-panel: 0.55s;
-  --dur-loop: 4.5s;
-}
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-background: oklch(16% 0.025 250);
-    --color-background-elevated: oklch(18% 0.028 250);
-    --color-surface: oklch(21% 0.03 250);
-    --color-surface-2: oklch(25% 0.035 250);
-    --color-border: oklch(42% 0.04 250);
-    --color-border-strong: oklch(55% 0.05 250);
-    --color-text-primary: oklch(95% 0.01 250);
-    --color-text-secondary: oklch(84% 0.015 250);
-    --color-text-tertiary: oklch(72% 0.015 250);
-    --color-primary: oklch(72% 0.16 255);
-    --color-primary-strong: oklch(66% 0.18 255);
-    --color-primary-on: oklch(15% 0.02 250);
-    --color-success: oklch(74% 0.15 160);
-    --color-warning: oklch(80% 0.15 80);
-    --color-danger: oklch(70% 0.20 24);
-    --color-focus: oklch(76% 0.16 250);
-    --color-chart-junior: oklch(76% 0.14 55);
-    --color-chart-senior: oklch(76% 0.14 165);
-  }
-}
-
-/* ── motion primitives (use transforms / opacity; respect reduced-motion below) */
-@keyframes floatGlow {
-  0%, 100% { background-position: 0% 0%, 0% 0%; }
-  50% { background-position: 10% 12%, 0% 0%; }
-}
-@keyframes blobPulse {
-  0%, 100% { transform: scale(1) translate(0, 0); opacity: 0.55; }
-  50% { transform: scale(1.08) translate(2%, -1%); opacity: 0.85; }
-}
-@keyframes panelRise {
-  from { opacity: 0; transform: translateY(10px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-@keyframes titleBeacon {
-  0%, 100% { text-shadow: 0 0 0 transparent; }
-  50% { text-shadow: 0 0 20px color-mix(in oklch, var(--color-primary) 32%, transparent); }
-}
-@keyframes xpGlint {
-  0% { transform: translateX(-120%); }
-  100% { transform: translateX(120%); }
-}
-@keyframes scanDrift {
-  from { background-position: 0 0; }
-  to { background-position: 0 8px; }
-}
-@keyframes borderPulse {
-  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--color-primary) 28%, transparent); }
-  50% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--color-primary) 20%, transparent); }
-}
-@keyframes hudEdgePulse {
-  0%, 100% { box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-primary) 12%, transparent); }
-  50% { box-shadow: 0 0 20px 1px color-mix(in oklch, var(--color-primary) 10%, transparent); }
-}
-@keyframes livePulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
-}
-@keyframes cardPop {
-  from { opacity: 0; transform: translateY(6px) scale(0.99); }
-  to { opacity: 1; transform: translateY(0) scale(1); }
-}
-/* Gradio shell + global typography */
-.gradio-container,
-.gradio-container * { font-family: var(--body); }
-.gradio-container {
-  position: relative;
-  z-index: 0;
-  background:
-    radial-gradient(1200px 700px at 70% -10%, color-mix(in oklch, var(--color-primary) 16%, transparent) 0%, transparent 70%),
-    var(--color-background) !important;
-  background-size: 120% 120%, 100% 100% !important;
-  animation: floatGlow 32s ease-in-out infinite;
-  color: var(--color-text-primary) !important;
-  min-height: 100vh;
-  line-height: 1.5;
-}
-.gradio-container::after {
-  content: '';
-  position: fixed;
-  inset: 0;
-  z-index: 0;
-  pointer-events: none;
-  background: radial-gradient(50vmax 50vmax at 85% 5%, color-mix(in oklch, var(--color-primary) 8%, transparent) 0%, transparent 65%);
-  animation: blobPulse 20s ease-in-out infinite;
-  opacity: 0.3;
-}
-.gradio-container > * {
-  position: relative;
-  z-index: 1;
-}
-.gradio-container :is(h1, h2, h3, h4, h5) {
-  color: var(--color-text-primary) !important;
-  line-height: 1.25;
-}
-.gradio-container code, .gradio-container pre { font-family: var(--code); }
-.gradio-container :focus-visible {
-  outline: 2px solid var(--color-focus) !important;
-  outline-offset: 2px;
-}
-
-/* Inputs / textareas: terminal-mono */
-.gradio-container textarea,
-.gradio-container input[type="text"],
-.gradio-container input[type="number"] {
-  font-family: var(--code) !important;
-  font-size: var(--font-size-sm) !important;
-  background: var(--color-surface) !important;
-  color: var(--color-text-primary) !important;
-  border: 1px solid var(--color-border) !important;
-  border-radius: var(--radius-sm) !important;
-}
-.gradio-container textarea:focus,
-.gradio-container input:focus {
-  border-color: var(--color-focus) !important;
-  outline: none !important;
-}
-#pr_diff_box textarea, #test_output_box textarea, #real_pr_diff_box textarea {
-  font-family: var(--code) !important;
-  font-size: var(--font-size-sm) !important;
-}
-
-/* Labels */
-.gradio-container label, .gradio-container .label-wrap span {
-  font-family: var(--body) !important;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  font-size: var(--font-size-xs) !important;
-  color: var(--color-text-secondary) !important;
-}
-
-/* Buttons and controls */
-.gradio-container button {
-  font-family: var(--body) !important;
-  font-weight: 700 !important;
-  letter-spacing: 0.06em !important;
-  text-transform: uppercase !important;
-  border-radius: var(--radius-sm) !important;
-  border: 1px solid var(--color-border-strong) !important;
-  background: var(--color-surface) !important;
-  color: var(--color-text-primary) !important;
-  transition: transform 120ms ease-out, background 120ms ease-out, border 120ms ease-out;
-}
-.gradio-container button:hover {
-  transform: translateY(-1px);
-  background: var(--color-surface-2) !important;
-  border-color: var(--color-primary) !important;
-}
-.gradio-container button.primary, .gradio-container .primary > button {
-  background: var(--color-primary) !important;
-  color: var(--color-primary-on) !important;
-  border-color: var(--color-primary-strong) !important;
-}
-.gradio-container button.primary:hover, .gradio-container .primary > button:hover {
-  background: var(--color-primary-strong) !important;
-  box-shadow: 0 4px 18px -4px color-mix(in oklch, var(--color-primary) 30%, transparent) !important;
-}
-@media (hover: hover) and (pointer: fine) {
-  .gradio-container button.primary:hover, .gradio-container .primary > button:hover {
-    transform: translateY(-1px) scale(1.01);
-  }
-}
-
-/* Tabs */
-.gradio-container .tab-nav button {
-  font-family: var(--display) !important;
-  letter-spacing: 0.10em !important;
-  font-size: var(--font-size-sm) !important;
-  background: transparent !important;
-  border: 1px solid transparent !important;
-  border-bottom: 2px solid transparent !important;
-  border-radius: 0 !important;
-  color: var(--color-text-secondary) !important;
-  transition: color 0.22s var(--ease-snap), border-color 0.22s var(--ease-snap), transform 0.2s var(--ease-snap) !important;
-}
-.gradio-container .tab-nav button.selected {
-  color: var(--color-primary) !important;
-  border-bottom-color: var(--color-primary) !important;
-}
-.gradio-container .tab-nav button:hover:not(.selected) {
-  color: var(--color-text-primary) !important;
-  transform: translateY(-1px);
-}
-
-/* Generic surface used for every panel */
-.gradio-container .block, .gradio-container .form, .gradio-container .gradio-html {
-  background: transparent !important;
-}
-
-/* ── HUD ───────────────────────────────────────────── */
-.hud {
-  position: relative;
-  z-index: 0;
-  border: 1px solid var(--color-border);
-  background: linear-gradient(180deg, var(--color-surface-2) 0%, var(--color-surface) 100%);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4) var(--space-5);
-  overflow: hidden;
-}
-.hud-ambient {
-  animation:
-    panelRise var(--dur-panel) var(--ease-snap) both,
-    hudEdgePulse 5.2s ease-in-out 0.55s infinite;
-}
-.hud-orbit {
-  position: absolute;
-  inset: 0;
-  z-index: 0;
-  background-image: repeating-linear-gradient(
-    0deg,
-    transparent 0 3px,
-    color-mix(in oklch, var(--color-text-primary) 4%, transparent) 3px,
-    transparent 4px
-  );
-  background-size: 100% 8px;
-  mix-blend-mode: overlay;
-  opacity: 0.2;
-  pointer-events: none;
-  animation: scanDrift 14s linear infinite;
-}
-.hud::before, .hud::after {
-  content: '';
-  position: absolute;
-  z-index: 2;
-  width: 14px; height: 14px;
-  border: 2px solid var(--color-primary);
-  opacity: 0.7;
-  transition: border-color 0.3s var(--ease-snap);
-}
-.hud::before { top: 6px; left: 6px; border-right: none; border-bottom: none; }
-.hud::after  { bottom: 6px; right: 6px; border-left: none; border-top: none; }
-.hud:hover::before, .hud:hover::after {
-  opacity: 1;
-  border-color: var(--color-primary-strong);
-}
-.hud-row {
-  position: relative;
-  z-index: 1;
-  display: grid;
-  grid-template-columns: auto 1.4fr auto auto auto;
-  gap: var(--space-5);
-  align-items: center;
-}
-.hud-cell { min-width: 0; }
-.hud-cell-right { justify-self: end; text-align: right; }
-.hud-grow { min-width: 220px; }
-.hud-label {
-  font-family: var(--display);
-  font-size: var(--font-size-xs);
-  letter-spacing: 0.18em;
-  color: var(--color-text-secondary);
-  text-transform: uppercase;
-  margin-bottom: 4px;
-}
-.hud-value {
-  font-family: var(--display);
-  font-size: var(--font-size-xl);
-  color: var(--color-text-primary);
-}
-.hud-value .hud-sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-left: 4px; }
-.hud-meta {
-  position: relative;
-  z-index: 1;
-  margin-top: var(--space-3);
-  display: flex;
-  gap: var(--space-2);
-  flex-wrap: wrap;
-}
-.hud-pill {
-  font-family: var(--body);
-  font-size: var(--font-size-xs);
-  letter-spacing: 0.06em;
-  padding: 3px 10px;
-  border-radius: 999px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-background-elevated);
-  text-transform: uppercase;
-}
-.hud-pill-mint   { color: var(--color-success); border-color: color-mix(in oklch, var(--color-success) 58%, var(--color-border)); }
-.hud-pill-amber  { color: var(--color-warning); border-color: color-mix(in oklch, var(--color-warning) 58%, var(--color-border)); }
-.hud-pill-danger { color: var(--color-danger);  border-color: color-mix(in oklch, var(--color-danger) 58%, var(--color-border)); }
-.hud-pill-muted  { color: var(--color-text-secondary); }
-
-/* XP bar */
-.xpbar {
-  width: 100%;
-  height: 12px;
-  background: var(--color-background-elevated);
-  border: 1px solid var(--color-border);
-  border-radius: 6px;
-  overflow: hidden;
-  margin-top: 4px;
-  position: relative;
-}
-.xpbar-fill {
-  position: relative;
-  height: 100%;
-  background: repeating-linear-gradient(
-    90deg,
-    var(--color-primary) 0 8px,
-    var(--color-primary-strong) 8px 16px
-  );
-  transition: width 600ms var(--ease-snap);
-  overflow: hidden;
-}
-.xpbar-fill::after {
-  content: '';
-  position: absolute;
-  top: 0; bottom: 0; left: 0;
-  width: 45%;
-  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--color-primary-on) 18%, transparent), transparent);
-  animation: xpGlint 2.1s var(--ease-snap) infinite;
-  pointer-events: none;
-}
-
-/* Production status */
-.prod {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--display);
-  font-size: var(--font-size-md);
-  padding: 4px 10px;
-  border: 1px solid var(--color-border-strong);
-  border-radius: 8px;
-  background: var(--color-background-elevated);
-}
-.prod-dot {
-  width: 10px; height: 10px; border-radius: 50%;
-  box-shadow: 0 0 0 2px var(--color-background-elevated);
-}
-.prod-pct { font-size: var(--font-size-xs); color: var(--color-text-secondary); }
-.prod-ok      { color: var(--color-success); border-color: color-mix(in oklch, var(--color-success) 58%, var(--color-border)); }
-.prod-ok      .prod-dot { background: var(--color-success); animation: pulse 2.4s infinite; }
-.prod-warn    { color: var(--color-warning); border-color: color-mix(in oklch, var(--color-warning) 58%, var(--color-border)); }
-.prod-warn    .prod-dot { background: var(--color-warning); animation: pulse 1.6s infinite; }
-.prod-danger  { color: var(--color-danger); border-color: color-mix(in oklch, var(--color-danger) 58%, var(--color-border)); }
-.prod-danger  .prod-dot { background: var(--color-danger); animation: pulse 0.8s infinite; }
-
-@keyframes pulse {
-  0%,100% { opacity: 1; transform: scale(1); }
-  50%     { opacity: 0.55; transform: scale(0.85); }
-}
-
-/* ── Mission strip (shown on episode load) ───────────── */
-.mission-strip {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-3);
-  align-items: center;
-  padding: var(--space-3) var(--space-4);
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-primary);
-  transition: box-shadow 0.35s var(--ease-snap), border-color 0.35s var(--ease-snap);
-  animation: panelRise var(--dur-panel) var(--ease-snap) both;
-}
-.mission-strip.mission-active {
-  border-color: color-mix(in oklch, var(--color-primary) 55%, var(--color-border)) !important;
-  animation: panelRise var(--dur-panel) var(--ease-snap) both, borderPulse 2.8s ease-in-out 0.4s infinite;
-}
-.mission-ready { border-color: var(--color-border) !important; }
-.mission-tag {
-  font-family: var(--display);
-  letter-spacing: 0.18em;
-  font-size: var(--font-size-xs);
-  padding: 4px 10px;
-  border-radius: 6px;
-  background: var(--color-primary);
-  color: var(--color-primary-on);
-}
-.mission-error { color: var(--color-danger); border-color: color-mix(in oklch, var(--color-danger) 62%, var(--color-border)); }
-.mission-warn  { color: var(--color-warning); border-color: color-mix(in oklch, var(--color-warning) 62%, var(--color-border)); }
-.mission-error .mission-tag { background: var(--color-danger); color: var(--color-primary-on); }
-.mission-warn .mission-tag { background: var(--color-warning); color: oklch(22% 0.02 250); }
-.mission-id code { color: var(--color-primary); font-family: var(--code); font-size: var(--font-size-xs); }
-.mission-meta { color: var(--color-text-secondary); }
-
-/* ── Status banner (mission report) ────────────────── */
-.banner {
-  border: 1px solid var(--color-border-strong);
-  border-radius: var(--radius-lg);
-  padding: var(--space-4) var(--space-5);
-  background: var(--color-surface);
-  position: relative;
-}
-.banner-anim { animation: panelRise 0.48s var(--ease-snap) both; }
-.banner-ok      { border-color: color-mix(in oklch, var(--color-success) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-success) 35%, transparent) inset; }
-.banner-danger  { border-color: color-mix(in oklch, var(--color-danger) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-danger) 35%, transparent) inset; }
-.banner-warn    { border-color: color-mix(in oklch, var(--color-warning) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-warning) 35%, transparent) inset; }
-.banner-muted   { border-color: var(--color-border); }
-.banner-head {
-  display: flex; align-items: center; justify-content: space-between;
-  margin-bottom: var(--space-2);
-}
-.banner-badge {
-  font-family: var(--display);
-  letter-spacing: 0.18em;
-  font-size: var(--font-size-sm);
-}
-.banner-ok    .banner-badge { color: var(--color-success); }
-.banner-warn  .banner-badge { color: var(--color-warning); }
-.banner-danger .banner-badge { color: var(--color-danger); }
-.banner-muted .banner-badge { color: var(--color-text-secondary); }
-.banner-xp {
-  font-family: var(--display);
-  font-size: var(--font-size-xl);
-  color: var(--color-primary);
-}
-.banner-prod { color: var(--color-text-primary); margin-bottom: var(--space-3); }
-.banner-stats {
-  display: flex; gap: var(--space-5);
-  font-family: var(--code); font-size: var(--font-size-sm);
-  padding: var(--space-2) 0; margin-bottom: var(--space-2);
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-}
-.banner-stats em { font-style: normal; }
-.banner-stats em.ok      { color: var(--color-success); }
-.banner-stats em.danger  { color: var(--color-danger); }
-.banner-stats .stat-key  { color: var(--color-text-secondary); margin-right: 4px; text-transform: uppercase; font-size: var(--font-size-xs); }
-.banner-line { font-size: var(--font-size-sm); margin-top: 6px; color: var(--color-text-primary); }
-.banner-line.muted { color: var(--color-text-secondary); }
-.banner-foot { margin-top: var(--space-3); font-size: var(--font-size-xs); color: var(--color-text-tertiary); }
-.banner-foot code { color: var(--color-primary); }
-
-/* ── Generic side cards (brain, cascade) ──────────── */
-.hud-card {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  margin-bottom: var(--space-3);
-  overflow: hidden;
-}
-.hud-card-title {
-  font-family: var(--display);
-  letter-spacing: 0.16em;
-  font-size: var(--font-size-xs);
-  color: var(--color-text-secondary);
-  padding: var(--space-2) var(--space-4);
-  border-bottom: 1px solid var(--color-border);
-  background: var(--color-background-elevated);
-}
-.hud-card-body { padding: var(--space-3) var(--space-4); font-size: var(--font-size-sm); color: var(--color-text-primary); }
-.hud-card-ok      .hud-card-title { color: var(--color-success); }
-.hud-card-warn    .hud-card-title { color: var(--color-warning); }
-.hud-card-danger  .hud-card-title { color: var(--color-danger); }
-.hud-card-muted   .hud-card-title { color: var(--color-text-tertiary); }
-
-.brain-meta { color: var(--color-text-secondary); font-size: var(--font-size-xs); margin-bottom: var(--space-2); }
-.brain-grid { display: grid; gap: 4px; }
-.brain-row { display: grid; grid-template-columns: 90px 1fr 50px; align-items: center; gap: var(--space-3); font-family: var(--code); font-size: var(--font-size-sm); }
-.brain-mode { color: var(--color-text-secondary); text-transform: uppercase; letter-spacing: 0.06em; font-size: var(--font-size-xs); }
-.brain-bar  { color: var(--color-primary); }
-.brain-pct  { color: var(--color-text-primary); text-align: right; }
-
-/* Cascade rows */
-.cascade-help { color: var(--color-text-secondary); font-size: var(--font-size-xs); margin-bottom: var(--space-3); }
-.cascade-row {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-2) var(--space-3);
-  margin-top: var(--space-2);
-  background: var(--color-background-elevated);
-}
-.cascade-ok     { border-color: color-mix(in oklch, var(--color-success) 62%, var(--color-border)); }
-.cascade-warn   { border-color: color-mix(in oklch, var(--color-warning) 62%, var(--color-border)); }
-.cascade-danger { border-color: color-mix(in oklch, var(--color-danger) 62%, var(--color-border)); }
-.cascade-meta {
-  font-family: var(--display); font-size: var(--font-size-xs); letter-spacing: 0.16em;
-  color: var(--color-text-secondary); display: flex; justify-content: space-between;
-  text-transform: uppercase;
-}
-.cascade-ok     .cascade-depth { color: var(--color-success); }
-.cascade-warn   .cascade-depth { color: var(--color-warning); }
-.cascade-danger .cascade-depth { color: var(--color-danger); }
-.cascade-chain { font-family: var(--code); font-size: var(--font-size-sm); margin-top: 4px; color: var(--color-text-primary); }
-.cascade-arrow { color: var(--color-text-tertiary); margin: 0 4px; }
-
-/* ── Loadout buttons block ───────────────────────────── */
-.loadouts {
-  display: grid; grid-template-columns: 1fr 1fr; gap: var(--space-3);
-  margin: var(--space-2) 0;
-}
-.loadout-card {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm); padding: var(--space-3);
-  background: var(--color-background-elevated);
-  transition: transform 0.22s var(--ease-snap), box-shadow 0.22s var(--ease-snap), border-color 0.2s;
-}
-.loadout-card:hover {
-  transform: translateY(-3px);
-  border-color: color-mix(in oklch, var(--color-primary) 40%, var(--color-border));
-  box-shadow: 0 8px 28px -8px color-mix(in oklch, var(--color-primary) 12%, transparent);
-}
-.loadout-title { font-family: var(--display); font-size: var(--font-size-xs); letter-spacing: 0.14em; color: var(--color-text-secondary); }
-.loadout-name  { font-size: var(--font-size-sm); font-weight: 600; margin-top: 2px; color: var(--color-text-primary); }
-.loadout-stats { font-family: var(--code); font-size: var(--font-size-xs); color: var(--color-text-secondary); margin-top: 4px; }
-
-/* ── Leaderboard tiles ──────────────────────────────── */
-.tiles { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-3) 0; }
-.tile {
-  flex: 1 1 200px;
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  background: var(--color-surface);
-  padding: var(--space-3) var(--space-4);
-}
-.tile-title {
-  font-family: var(--display); font-size: var(--font-size-xs); letter-spacing: 0.16em;
-  color: var(--color-text-secondary); text-transform: uppercase;
-}
-.tile-row { display: flex; gap: var(--space-4); margin-top: var(--space-2); }
-.tile-key { display: block; font-size: var(--font-size-xs); color: var(--color-text-tertiary); text-transform: uppercase; letter-spacing: 0.10em; }
-.tile-val { font-family: var(--display); font-size: var(--font-size-lg); color: var(--color-text-primary); }
-.tile-delta { font-family: var(--code); font-size: var(--font-size-sm); margin-top: 6px; }
-.tile-ok     { box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-success) 36%, transparent) inset; }
-.tile-ok     .tile-delta { color: var(--color-success); }
-.tile-danger { box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-danger) 36%, transparent) inset; }
-.tile-danger .tile-delta { color: var(--color-danger); }
-.tile-muted  .tile-delta { color: var(--color-text-secondary); }
-
-/* Help cards */
-.help-card {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-sm);
-  padding: var(--space-3) var(--space-4);
-  background: var(--color-background-elevated);
-  font-size: var(--font-size-sm);
-  color: var(--color-text-secondary);
-}
-.help-card b, .help-card code { color: var(--color-text-primary); }
-.help-card--rise { animation: cardPop 0.55s var(--ease-snap) both; }
-.help-card + .help-card { margin-top: var(--space-2); }
-
-/* H1 / page title + hero */
-.app-header { margin-bottom: var(--space-4); }
-.app-hero-row {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: var(--space-4);
-}
-.app-hero-text { flex: 1 1 18rem; }
-.signal-cluster { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
-.signal-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  font-family: var(--display);
-  font-size: var(--font-size-xs);
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--color-border-strong);
-  background: var(--color-background-elevated);
-  color: var(--color-text-secondary);
-  transition: border-color 0.2s, color 0.2s, transform 0.2s var(--ease-snap);
-  animation: panelRise 0.5s var(--ease-snap) both;
-  animation-delay: 0.12s;
-}
-.signal-pill + .signal-pill { animation-delay: 0.22s; }
-.signal-pill--live { color: var(--color-danger); border-color: color-mix(in oklch, var(--color-danger) 45%, var(--color-border)); }
-.signal-pill--live::before { content: ''; width: 7px; height: 7px; background: var(--color-danger); border-radius: 50%; animation: livePulse 1.2s ease-in-out infinite; }
-.page-title {
-  font-family: var(--display);
-  letter-spacing: 0.20em;
-  font-size: var(--font-size-2xl);
-  color: var(--color-text-primary);
-  margin: 0;
-  animation: panelRise 0.65s var(--ease-snap) both, titleBeacon 4.2s ease-in-out 0.5s infinite;
-}
-.page-sub {
-  color: var(--color-text-secondary);
-  font-size: var(--font-size-md);
-  margin-top: 4px;
-  max-width: 70ch;
-  animation: panelRise 0.6s var(--ease-snap) 0.08s both;
-}
-
-/* Quick benchmark HTML panel */
-.bench-report {
-  border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
-  padding: var(--space-4);
-  background: var(--color-surface);
-  animation: panelRise var(--dur-panel) var(--ease-snap) both;
-}
-.bench-report-title { font-family: var(--display); font-size: var(--font-size-md); margin: 0 0 var(--space-2); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-primary); }
-.bench-report-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-3); }
-.bench-pill { font-size: var(--font-size-xs); letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-background-elevated); color: var(--color-text-primary); }
-.bench-report-list { margin: 0; padding-left: 1.2rem; color: var(--color-text-primary); line-height: 1.65; font-size: var(--font-size-sm); }
-.bench-report-list strong { color: var(--color-primary); font-weight: 700; }
-
-/* DataFrames */
-.gradio-container .table-wrap, .gradio-container .gr-dataframe {
-  background: var(--color-surface) !important;
-  border: 1px solid var(--color-border) !important;
-  border-radius: 10px !important;
-}
-.leaderboard-head { margin-bottom: var(--space-2); }
-.chart-container .plotly .xtick text,
-.chart-container .plotly .ytick text,
-.chart-container .plotly .legendtext {
-  fill: var(--color-text-secondary) !important;
-}
-
-.gradio-container [class*="markdown"] p,
-.gradio-container [class*="markdown"] li,
-.gradio-container [class*="markdown"] th,
-.gradio-container [class*="markdown"] td {
-  color: var(--color-text-primary) !important;
-}
-.gradio-container [class*="markdown"] a {
-  color: var(--color-primary) !important;
-}
-.replay-markdown, .replay-markdown p, .replay-markdown em, .replay-markdown strong {
-  color: var(--color-text-primary) !important;
-}
-.gradio-container .replay-markdown { animation: panelRise 0.45s var(--ease-snap) both; }
-
-@media (prefers-reduced-motion: reduce) {
-  .gradio-container,
-  .gradio-container::after,
-  .page-title,
-  .page-sub,
-  .signal-pill,
-  .hud,
-  .hud-ambient,
-  .hud-orbit,
-  .xpbar-fill::after,
-  .mission-strip,
-  .mission-strip.mission-active,
-  .banner-anim,
-  .bench-report,
-  .help-card--rise,
-  .hud-card,
-  .cascade-row,
-  .signal-pill--live::before,
-  .prod-ok .prod-dot,
-  .prod-warn .prod-dot,
-  .prod-danger .prod-dot {
-    animation: none !important;
-  }
-  .gradio-container { background-size: 100% 100%, 100% 100% !important; }
-  .gradio-container::after { opacity: 0.1; }
-  .gradio-container .replay-markdown { animation: none !important; }
-  .loadout-card,
-  .gradio-container button,
-  .gradio-container .tab-nav button {
-    transition: none !important;
-  }
-  .loadout-card:hover,
-  .gradio-container button:hover,
-  .gradio-container .tab-nav button:hover:not(.selected) {
-    transform: none !important;
-  }
-}
-
-@media (max-width: 980px) {
-  .hud-row { grid-template-columns: 1fr 1fr; gap: var(--space-3); }
-  .hud-cell-right { justify-self: stretch; text-align: left; }
-  .loadouts { grid-template-columns: 1fr; }
-}
-"""
+_SPACE_CSS = _load_space_css()
 
 
 # ─── output tuples (kept identical to v1 for back-compat) ───────────────────
@@ -1382,7 +667,7 @@ _STEP_OUTPUTS_COUNT   = 13
 # ─── UI ─────────────────────────────────────────────────────────────────────
 
 _BLOCKS_KWARGS: dict[str, Any] = {
-    "title": "Bug Bounty Arena · CodeDrift",
+    "title": "CodeDrift Arena",
     # Keep css/theme on Blocks so Hugging Face Spaces (which imports `demo`
     # instead of running __main__) always receives the styling.
     "theme": gr.themes.Base(),
@@ -1391,392 +676,403 @@ _BLOCKS_KWARGS: dict[str, Any] = {
 
 with gr.Blocks(**_BLOCKS_KWARGS) as demo:
 
-    # ── Top HUD ────────────────────────────────────────────────────────────
-    gr.HTML(
-        "<header class='app-header'>"
-        "<div class='app-hero-row'>"
-        "<div class='app-hero-text'>"
-        "<h1 class='page-title'>BUG · BOUNTY · ARENA</h1>"
-        "<p class='page-sub'>An adversary mutates the codebase. A PR ships referencing the <em>old world</em>. "
-        "Tests crash. Your reviewer agent has one shot to <b>find the bug, name it, and trace the failure path</b> "
-        "— or production goes down for real.</p>"
-        "</div>"
-        "<div class='signal-cluster' aria-label='Session tags'>"
-        "<span class='signal-pill signal-pill--live'>LIVE ARENA</span>"
-        "<span class='signal-pill'>OPENENV · GRPO</span>"
-        "</div>"
-        "</div>"
-        "</header>"
-    )
+    with gr.Column(elem_classes=["ds-app"]):
 
-    env_state    = gr.State(None)
-    replay_state = gr.State([])
-    player_state = gr.State(dict(DEFAULT_PLAYER))
-
-    hud_html = gr.HTML(_hud_html(DEFAULT_PLAYER))
-
-    with gr.Row():
-        btn_reset_player = gr.Button("↻ Reset HUD (XP, streak, production)", variant="secondary")
-    btn_reset_player.click(reset_player, inputs=[player_state], outputs=[player_state, hud_html])
-
-    # ── Tabs ───────────────────────────────────────────────────────────────
-    with gr.Tabs():
-
-        # ── Mission Console ────────────────────────────────────────────────
-        with gr.Tab("◤ MISSION CONSOLE"):
-            gr.HTML(
-                "<div class='help-card help-card--rise'>"
-                "<b>1.</b> Tune the mission rules · <b>2.</b> Deploy a mission · <b>3.</b> Load a loadout "
-                "(<b>Junior Dev</b> for the failure baseline, <b>Senior Reviewer</b> for the trained policy) · "
-                "<b>4.</b> Submit the report. Each scored mission updates your <b>XP</b>, <b>streak</b>, "
-                "and <b>production health</b> at the top."
-                "</div>"
-            )
-
-            with gr.Row():
-                with gr.Column(scale=1):
-                    difficulty = gr.Dropdown(
-                        choices=["easy", "medium", "hard"], value="easy",
-                        label="Mission level",
-                    )
-                    personality = gr.Dropdown(
-                        choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
-                        value="random",
-                        label="Adversary style",
-                    )
-                    scenario_mode = gr.Dropdown(
-                        choices=["Random", "Edge Cases", "Hard Mode"],
-                        value="Random",
-                        label="Scenario preset",
-                    )
-                    seed = gr.Textbox(value="42", label="Seed", max_lines=1)
-                    btn_new = gr.Button("▶ DEPLOY MISSION", variant="primary")
-                    benchmark_n = gr.Slider(minimum=3, maximum=30, value=10, step=1, label="Quick leaderboard size")
-                    btn_benchmark = gr.Button("▦ QUICK LEADERBOARD")
-
-                with gr.Column(scale=2):
-                    status = gr.HTML(
-                        "<section class='mission-strip mission-ready' role='status' aria-live='polite'>"
-                        "<span class='mission-tag'>READY</span>"
-                        "<span class='mission-meta'>Press <b>Deploy Mission</b> to spawn a bug.</span>"
-                        "</section>"
-                    )
-
-            with gr.Row():
-                with gr.Column(scale=1):
-                    test_output_box = gr.Textbox(
-                        label="🔴 Failing tests (execution oracle)",
-                        lines=8, max_lines=14, interactive=False,
-                        elem_id="test_output_box",
-                    )
-                    pr_diff = gr.Textbox(
-                        label="📄 PR diff — what the reviewer must catch",
-                        lines=10, max_lines=18, interactive=False,
-                        elem_id="pr_diff_box",
-                    )
-                    codebase = gr.Textbox(
-                        label="📦 Current codebase (after drift)",
-                        lines=10,
-                    )
-                    prompt = gr.Textbox(
-                        label="🧾 Full model prompt",
-                        lines=4, max_lines=8,
-                    )
-
-                with gr.Column(scale=1):
-                    brain_panel = gr.HTML(_brain_html(None))
-
-                    review = gr.Textbox(
-                        label="📝 Reviewer report",
-                        lines=10,
-                        placeholder=(
-                            "VERDICT: REQUEST_CHANGES\n"
-                            "ROOT_CAUSE: <exact stale reference>\n"
-                            "FAILURE_PATH: test_name → caller → broken_ref\n"
-                            "CONFIDENCE: 0.9\n"
-                            "ISSUES: ...\n"
-                            "REASON: ..."
-                        ),
-                    )
-
-                    gr.HTML(
-                        "<div class='loadouts'>"
-                        "<div class='loadout-card'>"
-                        "<div class='loadout-title'>LOADOUT · BASELINE</div>"
-                        "<div class='loadout-name'>Junior Dev (untrained)</div>"
-                        "<div class='loadout-stats'>verdict: APPROVE · catches: 0 · ships bugs</div>"
-                        "</div>"
-                        "<div class='loadout-card'>"
-                        "<div class='loadout-title'>LOADOUT · TRAINED</div>"
-                        "<div class='loadout-name'>Senior Reviewer (GRPO)</div>"
-                        "<div class='loadout-stats'>verdict: REQUEST_CHANGES · cites stale refs · traces path</div>"
-                        "</div>"
-                        "</div>"
-                    )
-                    with gr.Row():
-                        btn_base    = gr.Button("LOAD JUNIOR")
-                        btn_trained = gr.Button("LOAD SENIOR")
-                    btn_submit = gr.Button("⌖ SUBMIT MISSION REPORT", variant="primary")
-
-                    cascade_panel = gr.HTML(_cascade_html(None))
-                    scorer_out = gr.Textbox(label="XP breakdown (JSON)", lines=10, max_lines=18, interactive=False)
-                    replay_out = gr.Markdown(
-                        "_No mission log yet. Submit a mission report to populate this panel._",
-                        elem_classes="replay-markdown",
-                    )
-
-        # ── Leaderboard tab ────────────────────────────────────────────────
-        with gr.Tab("◣ LEADERBOARD"):
-            gr.HTML(
-                "<div class='help-card help-card--rise'>"
-                "Send the <b>Junior</b> and the <b>Senior</b> on the same N missions. "
-                "Compare XP, win rate, and which bug families the Senior dominates."
-                "</div>"
-            )
-            with gr.Row():
-                cmp_n = gr.Slider(minimum=3, maximum=30, value=12, step=1, label="Missions in this run")
-                cmp_seed = gr.Textbox(value="42", label="Seed (start)", max_lines=1)
-                cmp_difficulty = gr.Dropdown(
-                    choices=["easy", "medium", "hard"], value="easy", label="Mission level"
+        # ── Top HUD ────────────────────────────────────────────────────────────
+        gr.HTML(
+            "<header class='ds-app-header'>"
+            "<h1 class='ds-h1'>CodeDrift Arena</h1>"
+            "<p class='ds-subtitle'>Train and evaluate review agents on adversarial code drift: "
+            "stale references ship in a PR, tests fail, and the model must trace the bug before merge.</p>"
+            "<ul class='ds-badges' aria-label='Stack'>"
+            "<li>OpenEnv</li><li>GRPO</li><li>Live demo</li>"
+            "</ul>"
+            "<div class='ds-signal-row' aria-label='Session'>"
+            "<span class='ds-signal ds-signal--accent'>Live</span>"
+            "<span class='ds-signal'>Hugging Face Space</span>"
+            "</div>"
+            "</header>"
+        )
+        
+        env_state    = gr.State(None)
+        replay_state = gr.State([])
+        player_state = gr.State(dict(DEFAULT_PLAYER))
+        
+        hud_html = gr.HTML(_hud_html(DEFAULT_PLAYER))
+        
+        with gr.Row(elem_classes=["ds-toolbar"]):
+            btn_reset_player = gr.Button("Reset run stats (XP, streak, production)", variant="secondary")
+        btn_reset_player.click(reset_player, inputs=[player_state], outputs=[player_state, hud_html])
+        
+        # ── Tabs ───────────────────────────────────────────────────────────────
+        with gr.Tabs():
+        
+            # ── Mission Console ────────────────────────────────────────────────
+            with gr.Tab("Mission"):
+                gr.HTML(
+                    "<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
+                    "<p class='ds-lead ds-lead--tight'>"
+                    "<strong>1.</strong> Set rules · <strong>2.</strong> Deploy · <strong>3.</strong> Load Junior or Senior · "
+                    "<strong>4.</strong> Submit. Scored runs update <strong>XP</strong>, <strong>streak</strong>, and "
+                    "<strong>production health</strong> in the bar above."
+                    "</p></div></section>"
                 )
-                cmp_personality = gr.Dropdown(
-                    choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
-                    value="random", label="Adversary style",
-                )
-            btn_compare = gr.Button("▶ RUN LEADERBOARD", variant="primary")
-            cmp_summary = gr.HTML(
-                "<section class='help-card help-card--rise' role='status'>"
-                "Press <b>Run Leaderboard</b> to populate the scoreboard."
-                "</section>"
-            )
-            with gr.Row():
-                cmp_chart = gr.BarPlot(
-                    label="XP per mission · Junior vs Senior",
-                    x="episode", y="reward", color="policy",
-                    tooltip=["episode", "policy", "reward", "drift_type"],
-                    height=320,
-                )
-                cmp_pattern_chart = gr.BarPlot(
-                    label="Avg XP by bug family",
-                    x="drift_type", y="reward", color="policy",
-                    tooltip=["drift_type", "policy", "reward"],
-                    height=320,
-                )
-            cmp_table = gr.Dataframe(
-                headers=["mission", "bug_family", "stale_ref", "junior_xp", "senior_xp", "delta_xp"],
-                label="Mission-by-mission detail",
-                wrap=True, interactive=False,
-            )
 
-            def _on_compare(n, seed_str, diff_lvl, persona):
-                try:
-                    base_seed = int(seed_str)
-                except (TypeError, ValueError):
-                    base_seed = 42
-                n = max(3, min(30, int(n)))
-                chart_rows: list[dict[str, Any]] = []
-                pattern_acc: dict[tuple[str, str], list[float]] = {}
-                table_rows: list[list[Any]] = []
-                base_total = trained_total = 0.0
-                wins = ties = 0
-                base_recall_total = trained_recall_total = 0.0
-                for i in range(n):
-                    s = base_seed + i
-                    env_b = CodeDriftEnv(difficulty=diff_lvl, personality=persona, seed=s)
-                    env_b.reset()
-                    _, rb, _, info_b = env_b.step(BASE_MODEL_RESPONSE)
-                    env_t = CodeDriftEnv(difficulty=diff_lvl, personality=persona, seed=s)
-                    env_t.reset()
-                    _, rt, _, info_t = env_t.step(_trained_response_for(env_t))
-                    drift_types = [a.drift_type for a in env_t.stale_actions] or ["unknown"]
-                    drift_type = drift_types[0]
-                    stale = env_t.stale_actions[0].stale_ref if env_t.stale_actions else ""
-                    base_total += rb
-                    trained_total += rt
-                    base_recall_total += float(info_b.get("recall", 0.0) or 0.0)
-                    trained_recall_total += float(info_t.get("recall", 0.0) or 0.0)
-                    if rt > rb + 1e-9:
-                        wins += 1
-                    elif abs(rt - rb) < 1e-9:
-                        ties += 1
-                    chart_rows.append({"episode": i + 1, "policy": "Junior", "reward": float(rb), "drift_type": drift_type})
-                    chart_rows.append({"episode": i + 1, "policy": "Senior", "reward": float(rt), "drift_type": drift_type})
-                    pattern_acc.setdefault((drift_type, "Junior"), []).append(rb)
-                    pattern_acc.setdefault((drift_type, "Senior"), []).append(rt)
-                    table_rows.append([i + 1, drift_type, stale, round(rb, 3), round(rt, 3), round(rt - rb, 3)])
-
-                base_avg = base_total / n
-                trained_avg = trained_total / n
-                base_recall_avg = base_recall_total / n
-                trained_recall_avg = trained_recall_total / n
-                tiles = (
-                    "<div class='tiles'>"
-                    + _metric_tile("AVG XP", base_avg * 100, trained_avg * 100, fmt="{:+.0f}")
-                    + _metric_tile("AVG RECALL", base_recall_avg, trained_recall_avg, fmt="{:.2f}")
-                    + _metric_tile("WIN RATE", 0.0, wins / n, fmt="{:.0%}")
-                    + _metric_tile("TIES", 0.0, ties, fmt="{:.0f}")
-                    + "</div>"
+                with gr.Row(elem_classes=["ds-row"]):
+                    with gr.Column(scale=1, elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Run</h2>")
+                        difficulty = gr.Dropdown(
+                            choices=["easy", "medium", "hard"], value="easy",
+                            label="Mission level",
+                        )
+                        personality = gr.Dropdown(
+                            choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
+                            value="random",
+                            label="Adversary style",
+                        )
+                        scenario_mode = gr.Dropdown(
+                            choices=["Random", "Edge Cases", "Hard Mode"],
+                            value="Random",
+                            label="Scenario preset",
+                        )
+                        seed = gr.Textbox(value="42", label="Seed", max_lines=1)
+                        btn_new = gr.Button("Deploy mission", variant="primary")
+                        benchmark_n = gr.Slider(minimum=3, maximum=30, value=10, step=1, label="Quick benchmark size")
+                        btn_benchmark = gr.Button("Run quick benchmark")
+        
+                    with gr.Column(scale=2, elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Outcome</h2>")
+                        status = gr.HTML(
+                            "<section class='ds-mission ds-mission--ready' role='status' aria-live='polite'>"
+                            "<span class='ds-mission__tag'>Ready</span>"
+                            "<span class='ds-mission__meta'>Press <b>Deploy mission</b> to spawn a bug.</span>"
+                            "</section>"
+                        )
+        
+                with gr.Row(elem_classes=["ds-row"]):
+                    with gr.Column(scale=1, elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Context</h2>")
+                        test_output_box = gr.Textbox(
+                            label="Failing tests (execution oracle)",
+                            lines=8, max_lines=14, interactive=False,
+                            elem_id="test_output_box",
+                        )
+                        pr_diff = gr.Textbox(
+                            label="PR diff (review target)",
+                            lines=10, max_lines=18, interactive=False,
+                            elem_id="pr_diff_box",
+                        )
+                        codebase = gr.Textbox(
+                            label="Codebase (after drift)",
+                            lines=10,
+                        )
+                        prompt = gr.Textbox(
+                            label="Full model prompt",
+                            lines=4, max_lines=8,
+                        )
+        
+                    with gr.Column(scale=1, elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Review</h2>")
+                        brain_panel = gr.HTML(_brain_html(None))
+        
+                        review = gr.Textbox(
+                            label="Reviewer report",
+                            lines=10,
+                            placeholder=(
+                                "VERDICT: REQUEST_CHANGES\n"
+                                "ROOT_CAUSE: <exact stale reference>\n"
+                                "FAILURE_PATH: test_name → caller → broken_ref\n"
+                                "CONFIDENCE: 0.9\n"
+                                "ISSUES: ...\n"
+                                "REASON: ..."
+                            ),
+                        )
+        
+                        gr.HTML(
+                            "<div class='loadouts' role='list'>"
+                            "<div class='ds-loadout' role='listitem'>"
+                            "<div class='loadout-title'>Baseline</div>"
+                            "<div class='loadout-name'>Junior (untrained)</div>"
+                            "<div class='loadout-stats'>APPROVE · recalls no stale refs</div>"
+                            "</div>"
+                            "<div class='ds-loadout' role='listitem'>"
+                            "<div class='loadout-title'>Trained</div>"
+                            "<div class='loadout-name'>Senior (GRPO)</div>"
+                            "<div class='loadout-stats'>REQUEST_CHANGES · cites stale refs</div>"
+                            "</div>"
+                            "</div>"
+                        )
+                        with gr.Row():
+                            btn_base    = gr.Button("Load Junior", variant="secondary")
+                            btn_trained = gr.Button("Load Senior", variant="secondary")
+                        btn_submit = gr.Button("Submit mission report", variant="primary")
+        
+                        cascade_panel = gr.HTML(_cascade_html(None))
+                        scorer_out = gr.Textbox(label="XP breakdown (JSON)", lines=10, max_lines=18, interactive=False)
+                        replay_out = gr.Markdown(
+                            "_No mission log yet. Submit a mission report to populate this panel._",
+                            elem_classes="replay-markdown",
+                        )
+        
+            # ── Leaderboard tab ────────────────────────────────────────────────
+            with gr.Tab("Leaderboard"):
+                gr.HTML(
+                    "<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
+                    "<p class='ds-lead ds-lead--tight'>Run the same <strong>N</strong> missions for Junior and Senior. "
+                    "Compare reward, recall, and wins by bug family.</p></div></section>"
                 )
-                header = (
-                    f"<section class='help-card leaderboard-head'>"
-                    f"<b>{n} missions</b> · level={diff_lvl} · adversary={persona}"
-                    f"</section>"
+                with gr.Row(elem_classes=["ds-row"]):
+                    with gr.Column(elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Parameters</h2>")
+                        cmp_n = gr.Slider(minimum=3, maximum=30, value=12, step=1, label="Missions in this run")
+                        cmp_seed = gr.Textbox(value="42", label="Seed (start)", max_lines=1)
+                        cmp_difficulty = gr.Dropdown(
+                            choices=["easy", "medium", "hard"], value="easy", label="Mission level"
+                        )
+                        cmp_personality = gr.Dropdown(
+                            choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
+                            value="random", label="Adversary style",
+                        )
+                        btn_compare = gr.Button("Run leaderboard", variant="primary")
+                cmp_summary = gr.HTML(
+                    "<section class='ds-card' role='status'><div class='ds-card__body'>"
+                    "<p class='ds-lead ds-lead--tight'>Press <strong>Run leaderboard</strong> to fill the scoreboard and charts.</p>"
+                    "</div></section>"
                 )
-                pattern_rows = [
-                    {"drift_type": dt, "policy": pol, "reward": round(sum(vs) / len(vs), 3)}
-                    for (dt, pol), vs in pattern_acc.items()
-                ]
-                return header + tiles, chart_rows, pattern_rows, table_rows
-
-            btn_compare.click(
-                _on_compare,
-                inputs=[cmp_n, cmp_seed, cmp_difficulty, cmp_personality],
-                outputs=[cmp_summary, cmp_chart, cmp_pattern_chart, cmp_table],
-            )
-
-        # ── Real-PR tab ────────────────────────────────────────────────────
-        with gr.Tab("◢ REAL-PR HUNTER"):
-            gr.HTML(
-                "<div class='help-card help-card--rise'>"
-                "<b>Two ways to load a PR:</b><br>"
-                "&nbsp;• <b>Paste a unified diff</b> directly, or<br>"
-                "&nbsp;• <b>Paste a GitHub URL</b> (PR / commit / compare / raw <code>.diff</code>) "
-                "and click <b>Fetch from GitHub</b> — the diff and detected stale refs auto-populate.<br><br>"
-                "<b>Honest note:</b> this does <i>not</i> run the PR's real test suite. The reward is based on "
-                "whether your review's <code>ISSUES</code> block cites the stale refs you (or the detector) confirmed."
-                "</div>"
-            )
-            with gr.Row():
-                real_url = gr.Textbox(
-                    label="GitHub URL (PR / commit / compare / raw .diff)",
-                    placeholder="https://github.com/bansalbhunesh/codedrift-arena/pull/1",
-                    lines=1, scale=4,
-                )
-                btn_fetch_url = gr.Button("⬇ FETCH FROM GITHUB", scale=1)
-            url_status = gr.Markdown("")
-            real_diff = gr.Textbox(
-                label="Unified diff (paste here OR fetched from URL above)",
-                lines=12,
-                placeholder="diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ ...",
-                elem_id="real_pr_diff_box",
-            )
-            with gr.Row():
-                btn_detect = gr.Button("◉ DETECT LANGUAGES + STALE REFS")
-                real_kind = gr.Dropdown(
-                    choices=["rename", "removal", "contract"], value="rename",
-                    label="Drift kind (how to score)",
-                )
-            detect_summary = gr.Markdown("_Click **Detect** after pasting a diff or fetching one from a URL._")
-            real_stale = gr.Textbox(
-                label="Stale refs to score against (one per line — edit before scoring)",
-                lines=4,
-                placeholder="getUserData\nutils/legacy.py\ncreateOrder(item, qty)",
-            )
-            real_review = gr.Textbox(
-                label="Reviewer response (VERDICT / ROOT_CAUSE / ISSUES / REASON)",
-                lines=8,
-                placeholder=(
-                    "VERDICT: REQUEST_CHANGES\n"
-                    "ROOT_CAUSE: <stale ref>\n"
-                    "ISSUES: <cite each stale ref here>\n"
-                    "REASON: ..."
-                ),
-            )
-            btn_score_real = gr.Button("⚖ SCORE REAL PR", variant="primary")
-            real_status = gr.HTML("")
-            real_json = gr.Textbox(label="Real-PR scoring breakdown (JSON)", lines=12, interactive=False)
-
-            def _on_detect(diff_text: str) -> tuple[str, str]:
-                if not (diff_text or "").strip():
-                    return ("Paste a diff first.", "")
-                summary = detect_languages(diff_text)
-                candidates = extract_candidate_stale_refs(diff_text, summary.languages)
-                md = (
-                    f"**Files:** {len(summary.files)}  "
-                    f"**+** {summary.additions}  **-** {summary.deletions}\n\n"
-                    f"**Detected languages:** {', '.join(summary.languages) or '(unknown)'}\n\n"
-                    f"**Candidate stale refs ({len(candidates)}):** "
-                    f"`{'`, `'.join(candidates) if candidates else 'none — try editing manually'}`"
-                )
-                return md, "\n".join(candidates)
-
-            def _on_score_real(diff_text: str, refs_text: str, review_text: str, drift_kind: str) -> tuple[str, str]:
-                refs = [ln.strip() for ln in (refs_text or "").splitlines() if ln.strip()]
-                if not (diff_text or "").strip():
-                    return (
-                        "<section class='mission-strip mission-warn' role='status'>EMPTY DIFF</section>",
-                        _fmt_info({"error": "empty_diff"}),
+                with gr.Row(elem_classes=["ds-row"]):
+                    cmp_chart = gr.BarPlot(
+                        label="XP per mission · Junior vs Senior",
+                        x="episode", y="reward", color="policy",
+                        tooltip=["episode", "policy", "reward", "drift_type"],
+                        height=320,
                     )
-                if not refs:
-                    return (
-                        "<section class='mission-strip mission-warn' role='status'>NEED ≥1 STALE REF</section>",
-                        _fmt_info({"error": "no_stale_refs"}),
+                    cmp_pattern_chart = gr.BarPlot(
+                        label="Avg XP by bug family",
+                        x="drift_type", y="reward", color="policy",
+                        tooltip=["drift_type", "policy", "reward"],
+                        height=320,
                     )
-                if not (review_text or "").strip():
-                    return (
-                        "<section class='mission-strip mission-warn' role='status'>EMPTY REVIEW</section>",
-                        _fmt_info({"error": "empty_review"}),
-                    )
-                try:
-                    reward, info, summary = score_real_pr(diff_text, review_text, refs, drift_kind=drift_kind)
-                    return _status_banner(reward, info), _fmt_info({"reward": reward, "diff_summary": summary, "scorer_info": info})
-                except Exception as exc:
-                    return (
-                        f"<section class='mission-strip mission-error' role='status'>SCORING FAILED · {exc!s}</section>",
-                        _fmt_info({"error": str(exc), "type": type(exc).__name__}),
-                    )
-
-            def _on_fetch(url_text: str) -> tuple[str, str, str, str]:
-                url = (url_text or "").strip()
-                if not url:
-                    return ("**Paste a GitHub URL first.**", "", "", "")
-                try:
-                    result = fetch_diff_from_url(url)
-                except Exception as exc:
-                    return (
-                        f"**Fetch failed:** {exc!s}",
-                        "",
-                        "Try the raw `.diff` URL or set `GITHUB_TOKEN` for private repos.",
-                        "",
-                    )
-                head = (
-                    f"**Fetched** {result.bytes_received:,} bytes from "
-                    f"`{result.resolved_url}`"
+                cmp_table = gr.Dataframe(
+                    headers=["mission", "bug_family", "stale_ref", "junior_xp", "senior_xp", "delta_xp"],
+                    label="Mission-by-mission detail",
+                    wrap=True, interactive=False,
                 )
-                extras = []
-                if result.truncated:
-                    extras.append(f"_Truncated to {MAX_FETCH_BYTES_FMT} bytes for safety._")
-                if result.note:
-                    extras.append(result.note)
-                status_md = head + ("\n\n" + "\n\n".join(extras) if extras else "")
-                detect_md, candidates = _on_detect(result.diff)
-                return status_md, result.diff, detect_md, candidates
-
-            btn_fetch_url.click(_on_fetch, inputs=[real_url], outputs=[url_status, real_diff, detect_summary, real_stale])
-            btn_detect.click(_on_detect, inputs=[real_diff], outputs=[detect_summary, real_stale])
-            btn_score_real.click(
-                _on_score_real,
-                inputs=[real_diff, real_stale, real_review, real_kind],
-                outputs=[real_status, real_json],
-            )
-
-        # ── Help / Why this works tab ──────────────────────────────────────
-        with gr.Tab("◆ WHY THIS WORKS"):
-            gr.HTML(
-                "<div class='help-card help-card--rise'>"
-                "<b>The setup</b> — A generator agent mutates the codebase (rename, removal, contract change, "
-                "or a multi-frame cascade). A PR is shipped that still references the <i>old world</i>. The test "
-                "suite crashes — that's the execution oracle. The reviewer's job is to <b>name the stale ref</b>, "
-                "<b>cite the failure path</b>, and <b>request changes</b>.<br><br>"
-                "<b>The reward</b> — Multi-component causal score: root cause + failure path + verdict + confidence "
-                "calibration − hallucination penalty. Easy to optimise honestly, hard to game.<br><br>"
-                "<b>The training</b> — TRL GRPO with a small Qwen2.5-1.5B-Instruct + LoRA. The generator runs an "
-                "adaptive curriculum (escalates to harder bug families when the reviewer wins too often).<br><br>"
-                "<b>The proof</b> — Held-out bug patterns the model never saw in training. The Leaderboard tab "
-                "shows reward delta and per-bug-family wins; the V2 evaluator script measures generalisation."
-                "</div>"
-            )
-
+        
+                def _on_compare(n, seed_str, diff_lvl, persona):
+                    try:
+                        base_seed = int(seed_str)
+                    except (TypeError, ValueError):
+                        base_seed = 42
+                    n = max(3, min(30, int(n)))
+                    chart_rows: list[dict[str, Any]] = []
+                    pattern_acc: dict[tuple[str, str], list[float]] = {}
+                    table_rows: list[list[Any]] = []
+                    base_total = trained_total = 0.0
+                    wins = ties = 0
+                    base_recall_total = trained_recall_total = 0.0
+                    for i in range(n):
+                        s = base_seed + i
+                        env_b = CodeDriftEnv(difficulty=diff_lvl, personality=persona, seed=s)
+                        env_b.reset()
+                        _, rb, _, info_b = env_b.step(BASE_MODEL_RESPONSE)
+                        env_t = CodeDriftEnv(difficulty=diff_lvl, personality=persona, seed=s)
+                        env_t.reset()
+                        _, rt, _, info_t = env_t.step(_trained_response_for(env_t))
+                        drift_types = [a.drift_type for a in env_t.stale_actions] or ["unknown"]
+                        drift_type = drift_types[0]
+                        stale = env_t.stale_actions[0].stale_ref if env_t.stale_actions else ""
+                        base_total += rb
+                        trained_total += rt
+                        base_recall_total += float(info_b.get("recall", 0.0) or 0.0)
+                        trained_recall_total += float(info_t.get("recall", 0.0) or 0.0)
+                        if rt > rb + 1e-9:
+                            wins += 1
+                        elif abs(rt - rb) < 1e-9:
+                            ties += 1
+                        chart_rows.append({"episode": i + 1, "policy": "Junior", "reward": float(rb), "drift_type": drift_type})
+                        chart_rows.append({"episode": i + 1, "policy": "Senior", "reward": float(rt), "drift_type": drift_type})
+                        pattern_acc.setdefault((drift_type, "Junior"), []).append(rb)
+                        pattern_acc.setdefault((drift_type, "Senior"), []).append(rt)
+                        table_rows.append([i + 1, drift_type, stale, round(rb, 3), round(rt, 3), round(rt - rb, 3)])
+        
+                    base_avg = base_total / n
+                    trained_avg = trained_total / n
+                    base_recall_avg = base_recall_total / n
+                    trained_recall_avg = trained_recall_total / n
+                    tiles = (
+                        "<div class='tiles'>"
+                        + _metric_tile("AVG XP", base_avg * 100, trained_avg * 100, fmt="{:+.0f}")
+                        + _metric_tile("AVG RECALL", base_recall_avg, trained_recall_avg, fmt="{:.2f}")
+                        + _metric_tile("WIN RATE", 0.0, wins / n, fmt="{:.0%}")
+                        + _metric_tile("TIES", 0.0, ties, fmt="{:.0f}")
+                        + "</div>"
+                    )
+                    header = (
+                        f"<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
+                        f"<p class='ds-lead ds-lead--tight'><strong>{n} missions</strong> · "
+                        f"level {diff_lvl} · adversary {persona}</p></div></section>"
+                    )
+                    pattern_rows = [
+                        {"drift_type": dt, "policy": pol, "reward": round(sum(vs) / len(vs), 3)}
+                        for (dt, pol), vs in pattern_acc.items()
+                    ]
+                    return header + tiles, chart_rows, pattern_rows, table_rows
+        
+                btn_compare.click(
+                    _on_compare,
+                    inputs=[cmp_n, cmp_seed, cmp_difficulty, cmp_personality],
+                    outputs=[cmp_summary, cmp_chart, cmp_pattern_chart, cmp_table],
+                )
+        
+            # ── Real-PR tab ────────────────────────────────────────────────────
+            with gr.Tab("Real PR"):
+                gr.HTML(
+                    "<section class='ds-card ds-section-gap'><div class='ds-card__body'>"
+                    "<p class='ds-lead ds-lead--tight'>Paste a unified diff, or paste a <strong>GitHub URL</strong> and "
+                    "fetch. This demo does <em>not</em> run the PR's tests — scoring checks whether <code>ISSUES</code> "
+                    "cites the stale refs you list below.</p></div></section>"
+                )
+                with gr.Row(elem_classes=["ds-row"]):
+                    with gr.Column(elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Diff & detection</h2>")
+                        with gr.Row():
+                            real_url = gr.Textbox(
+                                label="GitHub URL (optional)",
+                                placeholder="https://github.com/owner/repo/pull/1",
+                                lines=1, scale=4,
+                            )
+                            btn_fetch_url = gr.Button("Fetch from GitHub", scale=1)
+                        url_status = gr.Markdown("")
+                        real_diff = gr.Textbox(
+                            label="Unified diff",
+                            lines=12,
+                            placeholder="diff --git a/src/foo.py b/src/foo.py\n--- a/src/foo.py\n+++ b/src/foo.py\n@@ ...",
+                            elem_id="real_pr_diff_box",
+                        )
+                        with gr.Row():
+                            btn_detect = gr.Button("Detect languages + candidate refs", variant="secondary")
+                            real_kind = gr.Dropdown(
+                                choices=["rename", "removal", "contract"], value="rename",
+                                label="Drift kind (for scoring)",
+                            )
+                        detect_summary = gr.Markdown(
+                            "_Paste or fetch a diff, then run **Detect**._"
+                        )
+                    with gr.Column(elem_classes=["ds-group"]):
+                        gr.HTML("<h2 class='ds-block-title'>Review & score</h2>")
+                        real_stale = gr.Textbox(
+                            label="Stale refs to score (one per line)",
+                            lines=4,
+                            placeholder="getUserData\nutils/legacy.py\ncreateOrder(item, qty)",
+                        )
+                        real_review = gr.Textbox(
+                            label="Reviewer response",
+                            lines=8,
+                            placeholder=(
+                                "VERDICT: REQUEST_CHANGES\n"
+                                "ROOT_CAUSE: <stale ref>\n"
+                                "ISSUES: <cite each stale ref here>\n"
+                                "REASON: ..."
+                            ),
+                        )
+                        btn_score_real = gr.Button("Score real PR", variant="primary")
+                        real_status = gr.HTML("")
+                        real_json = gr.Textbox(label="Scoring breakdown (JSON)", lines=12, interactive=False)
+        
+                def _on_detect(diff_text: str) -> tuple[str, str]:
+                    if not (diff_text or "").strip():
+                        return ("Paste a diff first.", "")
+                    summary = detect_languages(diff_text)
+                    candidates = extract_candidate_stale_refs(diff_text, summary.languages)
+                    md = (
+                        f"**Files:** {len(summary.files)}  "
+                        f"**+** {summary.additions}  **-** {summary.deletions}\n\n"
+                        f"**Detected languages:** {', '.join(summary.languages) or '(unknown)'}\n\n"
+                        f"**Candidate stale refs ({len(candidates)}):** "
+                        f"`{'`, `'.join(candidates) if candidates else 'none — try editing manually'}`"
+                    )
+                    return md, "\n".join(candidates)
+        
+                def _on_score_real(diff_text: str, refs_text: str, review_text: str, drift_kind: str) -> tuple[str, str]:
+                    refs = [ln.strip() for ln in (refs_text or "").splitlines() if ln.strip()]
+                    if not (diff_text or "").strip():
+                        return (
+                            "<section class='ds-mission ds-mission--warn' role='status'><span class='ds-mission__tag'>Diff</span><span class='ds-mission__meta'>Empty diff</span></section>",
+                            _fmt_info({"error": "empty_diff"}),
+                        )
+                    if not refs:
+                        return (
+                            "<section class='ds-mission ds-mission--warn' role='status'><span class='ds-mission__tag'>Refs</span><span class='ds-mission__meta'>Need at least one stale ref</span></section>",
+                            _fmt_info({"error": "no_stale_refs"}),
+                        )
+                    if not (review_text or "").strip():
+                        return (
+                            "<section class='ds-mission ds-mission--warn' role='status'><span class='ds-mission__tag'>Review</span><span class='ds-mission__meta'>Empty review</span></section>",
+                            _fmt_info({"error": "empty_review"}),
+                        )
+                    try:
+                        reward, info, summary = score_real_pr(diff_text, review_text, refs, drift_kind=drift_kind)
+                        return _status_banner(reward, info), _fmt_info({"reward": reward, "diff_summary": summary, "scorer_info": info})
+                    except Exception as exc:
+                        return (
+                            f"<section class='ds-mission ds-mission--error' role='status'><span class='ds-mission__tag'>Error</span><span class='ds-mission__meta'>Scoring failed — {exc!s}</span></section>",
+                            _fmt_info({"error": str(exc), "type": type(exc).__name__}),
+                        )
+        
+                def _on_fetch(url_text: str) -> tuple[str, str, str, str]:
+                    url = (url_text or "").strip()
+                    if not url:
+                        return ("**Paste a GitHub URL first.**", "", "", "")
+                    try:
+                        result = fetch_diff_from_url(url)
+                    except Exception as exc:
+                        return (
+                            f"**Fetch failed:** {exc!s}",
+                            "",
+                            "Try the raw `.diff` URL or set `GITHUB_TOKEN` for private repos.",
+                            "",
+                        )
+                    head = (
+                        f"**Fetched** {result.bytes_received:,} bytes from "
+                        f"`{result.resolved_url}`"
+                    )
+                    extras = []
+                    if result.truncated:
+                        extras.append(f"_Truncated to {MAX_FETCH_BYTES_FMT} bytes for safety._")
+                    if result.note:
+                        extras.append(result.note)
+                    status_md = head + ("\n\n" + "\n\n".join(extras) if extras else "")
+                    detect_md, candidates = _on_detect(result.diff)
+                    return status_md, result.diff, detect_md, candidates
+        
+                btn_fetch_url.click(_on_fetch, inputs=[real_url], outputs=[url_status, real_diff, detect_summary, real_stale])
+                btn_detect.click(_on_detect, inputs=[real_diff], outputs=[detect_summary, real_stale])
+                btn_score_real.click(
+                    _on_score_real,
+                    inputs=[real_diff, real_stale, real_review, real_kind],
+                    outputs=[real_status, real_json],
+                )
+        
+            # ── Help / Why this works tab ──────────────────────────────────────
+            with gr.Tab("About"):
+                gr.HTML(
+                    "<section class='ds-card ds-doc'><div class='ds-card__body'>"
+                    "<h3 class='ds-h2'>How it works</h3>"
+                    "<p class='ds-subtitle'>A generator mutates the repo; a PR still references the old API. "
+                    "The test run fails — that is the oracle. The reviewer must <strong>name stale refs</strong>, "
+                    "<strong>trace the failure path</strong>, and <strong>request changes</strong>.</p>"
+                    "<h3 class='ds-h2'>Reward</h3>"
+                    "<p class='ds-subtitle'>Causal multi-part score: root cause, path, verdict, confidence calibration, "
+                    "minus hallucination.</p>"
+                    "<h3 class='ds-h2'>Training</h3>"
+                    "<p class='ds-subtitle'>TRL GRPO on a small instruct model with LoRA; curriculum escalates when the "
+                    "reviewer wins too often.</p>"
+                    "<h3 class='ds-h2'>Evaluation</h3>"
+                    "<p class='ds-subtitle'>Held-out bug families and the V2 evaluator script measure generalization "
+                    "beyond the training mix.</p>"
+                    "</div></section>"
+                )
+        
     # ── Wiring ─────────────────────────────────────────────────────────────
     _new_ep_outputs = [
         env_state, prompt, pr_diff, codebase, test_output_box, review,
