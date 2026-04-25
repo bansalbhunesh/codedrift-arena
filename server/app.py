@@ -534,7 +534,7 @@ def api_step(payload: StepRequest, request: Request) -> dict[str, object]:
         info.setdefault("episode_id", str(session.get("episode_id", "")))
     else:
         actions = _deserialize_actions(actions_payload)
-        reward, info = _scorer.score(payload.review, actions, pr_diff)
+        reward, info = _scorer.score(payload.review, actions, pr_diff, failure_cascade=None)
         info.setdefault("episode_id", str(session.get("episode_id", "")))
         done = True
     session["used"] = True

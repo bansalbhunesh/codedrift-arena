@@ -225,8 +225,8 @@ def verbosity_penalty(issues_norm: str, pr_diff: str) -> tuple[float, dict]:
     diff_tokens = max(len(d.split()), 1)
     ratio = issues_tokens / diff_tokens
     meta = {"issues_word_count": issues_tokens, "diff_word_count": diff_tokens, "verbosity_ratio": round(ratio, 3)}
-    # Threshold above ~3.3 avoids penalizing concise multi-drift ISSUES on tiny diffs
-    # (two catches in one sentence vs a 2–3 token diff).
+    # Threshold: ISSUES word count / diff word count must exceed 4.0 before penalizing.
+    # This avoids penalizing concise multi-drift ISSUES on small diffs.
     _VERBOSITY_RATIO_START = 4.0
     if ratio <= _VERBOSITY_RATIO_START:
         return 0.0, meta

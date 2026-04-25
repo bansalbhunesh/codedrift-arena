@@ -357,6 +357,17 @@
 .cascade-row { border: 1px solid var(--ds-border); border-radius: var(--radius); padding: var(--s-2) var(--s-3); margin-top: var(--s-2); background: var(--ds-bg-secondary); }
 .cascade-chain { font-family: var(--font-mono); font-size: 0.8rem; color: var(--ds-text-primary); line-height: 1.5; }
 .cascade-help { font-size: var(--text-caption); color: var(--ds-text-secondary); margin-bottom: var(--s-3); }
+.cascade-stale { color: var(--ds-danger); font-family: var(--font-mono); font-size: 0.82rem; }
+.cascade-error-tag {
+  margin-left: var(--s-2);
+  font-size: 0.6rem;
+  font-family: var(--font-mono);
+  color: var(--ds-danger);
+  background: color-mix(in oklch, var(--ds-danger) 10%, var(--ds-surface));
+  border: 1px solid color-mix(in oklch, var(--ds-danger) 25%, var(--ds-border));
+  padding: 1px 5px;
+  border-radius: 3px;
+}
 
 /* ——— Loadout ——— */
 .loadouts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s-3); margin: var(--s-3) 0; }

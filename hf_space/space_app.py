@@ -457,32 +457,46 @@ def _cascade_html(env: CodeDriftEnv | None) -> str:
             "</section>"
         )
     cascade = env.failure_cascade
-    cascade_calls = list(getattr(cascade, "calls", []) or []) if cascade else []
-    chains_by_action: dict[str, list[str]] = {}
-    for call in cascade_calls:
-        key = getattr(call, "stale_ref", "")
-        chains_by_action.setdefault(str(key), []).append(
-            f"{getattr(call, 'caller', '?')}() at {getattr(call, 'file', '?')}:{getattr(call, 'line', '?')}"
-        )
+    # FailureCascade.failures is list[TestFailure]; call_chain = [test, intermediate, stale]
+    failures_list = list(cascade.failures) if cascade and cascade.failures else []
+    # Index failures by the last element of their call_chain (the stale ref)
+    failure_by_stale: dict[str, Any] = {}
+    for f in failures_list:
+        if f.call_chain:
+            key = f.call_chain[-1].split("(")[0].lower()
+            failure_by_stale[key] = f
     rows: list[str] = []
     for idx, action in enumerate(env.stale_actions, start=1):
         stale = action.stale_ref
-        kind = action.drift_type
-        chain_frames = chains_by_action.get(stale, [])
-        if not chain_frames and action.metadata:
-            surface = action.metadata.get("surface_function") or "failing_test"
-            mid = action.metadata.get("intermediate") or action.metadata.get("caller") or "caller"
-            chain_frames = [f"{surface}()", f"{mid}()"]
-        if not chain_frames:
-            chain_frames = ["failing_test()"]
-        depth = len(chain_frames) + 1
-        nodes = chain_frames + [f"<b>{stale}</b>"]
-        chain_html = " <span class='cascade-arrow'>→</span> ".join(nodes)
+        kind = action.bug_pattern or action.drift_type
+        stale_bare = stale.split("(")[0].lower()
+        failure = failure_by_stale.get(stale_bare)
+        if failure is None:
+            # Try substring match
+            for k, v in failure_by_stale.items():
+                if stale_bare in k or k in stale_bare:
+                    failure = v
+                    break
+        if failure and failure.call_chain:
+            chain = failure.call_chain          # e.g. ["test_create_basic_order", "checkout_flow", "createOrder"]
+            error_label = failure.error_type    # e.g. "AttributeError"
+            test_name = failure.test_name
+        else:
+            mid = action.metadata.get("caller") or "caller"
+            chain = [f"test_{stale_bare}", mid, stale_bare]
+            error_label = "RuntimeError"
+            test_name = chain[0]
+        depth = len(chain)
+        # Render: each node except last as plain code, last as bold stale ref
+        nodes = [f"<code>{n}</code>" for n in chain[:-1]] + [f"<b class='cascade-stale'>{stale}</b>"]
+        chain_html = " <span class='cascade-arrow'>&rarr;</span> ".join(nodes)
         depth_tone = "ok" if depth <= 2 else "warn" if depth == 3 else "danger"
         depth_label = "shallow" if depth <= 2 else "indirect" if depth == 3 else "hidden cause"
         rows.append(
             f"<div class='cascade-row cascade-{depth_tone}'>"
-            f"<div class='cascade-meta'>#{idx} · {kind}<span class='cascade-depth'>depth {depth} · {depth_label}</span></div>"
+            f"<div class='cascade-meta'>#{idx} · <b>{kind}</b>"
+            f"<span class='cascade-depth'>depth {depth} · {depth_label}</span>"
+            f"<span class='cascade-error-tag'>{error_label}</span></div>"
             f"<div class='cascade-chain'>{chain_html}</div>"
             f"</div>"
         )
@@ -617,7 +631,7 @@ def submit_review(
             "episode_id": info.get("episode_id"),
             "reward": reward,
             "verdict": info.get("verdict"),
-            "missing_stale_refs_count": info.get("missing_stale_refs_count", 0),
+            "missing_stale_refs_count": len(info.get("missed") or []),
             "malformed_issues": info.get("malformed_issues", 0),
         })
         player = _apply_outcome(player, reward, info)
@@ -876,8 +890,12 @@ def run_battle(seed_str: str, difficulty: str, personality: str) -> tuple[str, s
     pattern = (action.bug_pattern or action.drift_type) if action else "unknown"
     stale_ref = action.stale_ref if action else "—"
 
-    paths = info_s.get("failure_paths") or []
-    failure_path = paths[0] if paths else f"test → caller → {stale_ref}"
+    # Build failure path from the actual cascade call_chain for the first action
+    _cascade_s = env_s.failure_cascade
+    if _cascade_s and _cascade_s.failures:
+        failure_path = " -> ".join(_cascade_s.failures[0].call_chain)
+    else:
+        failure_path = f"test -> caller -> {stale_ref}"
 
     html = _battle_html(
         episode_id=str(info_s.get("episode_id") or seed),
@@ -999,12 +1017,6 @@ def _load_space_css() -> str:
 
 
 _SPACE_CSS = _load_space_css()
-
-
-# ─── output tuples (kept identical to v1 for back-compat) ───────────────────
-
-_NEW_EP_OUTPUTS_COUNT = 13   # env, prompt, pr_diff, codebase, test_output, review, status, brain, scorer, replay_state, replay_out, player_state, hud_html
-_STEP_OUTPUTS_COUNT   = 13
 
 
 # ─── UI ─────────────────────────────────────────────────────────────────────

@@ -157,6 +157,7 @@ def make_reward_fn(difficulty: str):
                     agent_response=completion,
                     actions=actions,
                     pr_diff=diff,
+                    failure_cascade=None,
                 )
                 log.debug(
                     "reward_fn row=%s reward=%.3f recall=%.2f outcome=%s verdict=%s",
