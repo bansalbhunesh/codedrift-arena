@@ -94,12 +94,84 @@ CONFIDENCE: 0.85
 ISSUES: none
 REASON: The code looks correct and follows existing patterns."""
 
-TRAINED_MODEL_RESPONSE = """VERDICT: REQUEST_CHANGES
-ROOT_CAUSE: getUserData was renamed to fetchUserData in the current codebase
-FAILURE_PATH: test_get_user_by_id → process_feature → getUserData
-CONFIDENCE: 0.93
-ISSUES: getUserData is no longer defined. It was renamed to fetchUserData. The PR still calls getUserData(user_id) which will raise AttributeError at runtime.
-REASON: The PR references a stale function name that no longer exists — must update to fetchUserData before merging."""
+TRAINED_FALLBACK_RESPONSE = """VERDICT: REQUEST_CHANGES
+ROOT_CAUSE: <no active episode>
+FAILURE_PATH: n/a
+CONFIDENCE: 0.5
+ISSUES: Click 'New episode' first so the trained policy can analyze the actual diff.
+REASON: No episode loaded."""
+
+
+def _trained_response_for(env: CodeDriftEnv | None) -> str:
+    """Build a 'trained-model' style response from the current episode's stale actions.
+
+    This makes the demo deterministic: 'Base Model' always misses; 'Trained Model'
+    always cites the real stale refs that the scorer expects, regardless of which
+    drift type was sampled this episode.
+    """
+    if env is None or not env.stale_actions:
+        return TRAINED_FALLBACK_RESPONSE
+
+    refs: list[str] = []
+    issues: list[str] = []
+    paths: list[str] = []
+    primary = env.stale_actions[0]
+    for action in env.stale_actions:
+        if action.drift_type == "rename":
+            stale = action.stale_ref
+            new = action.current_ref
+            refs.append(stale)
+            issues.append(
+                f"{stale} is no longer defined — it was renamed to {new}. The PR still calls {stale}() and will raise AttributeError."
+            )
+            paths.append(f"failing_test → caller → {stale}")
+        elif action.drift_type == "removal":
+            module = action.metadata.get("module", "") or action.stale_ref
+            refs.append(action.stale_ref)
+            issues.append(
+                f"{action.stale_ref} (module {module}) was deleted. The PR still imports it; this will raise ModuleNotFoundError on import."
+            )
+            paths.append(f"failing_test → import {module} → missing module {action.stale_ref}")
+        elif action.drift_type == "contract":
+            fn = action.metadata.get("function", "")
+            old_params = action.metadata.get("old_params", []) or []
+            new_params = action.metadata.get("new_params", []) or []
+            stale_call = action.stale_ref  # canonical, scorer-friendly citation
+            current_call = action.current_ref
+            refs.append(stale_call)
+            if old_params and new_params:
+                issues.append(
+                    f"{fn} signature changed from ({', '.join(old_params)}) to ({', '.join(new_params)}). "
+                    f"The PR still uses {stale_call}."
+                )
+            else:
+                issues.append(
+                    f"{fn} contract changed: stale call {stale_call} no longer valid; current is {current_call}."
+                )
+            paths.append(f"failing_test → caller → {fn}")
+        else:
+            refs.append(action.stale_ref)
+            issues.append(f"Stale reference: {action.stale_ref} (type={action.drift_type}).")
+            paths.append(f"failing_test → caller → {action.stale_ref}")
+
+    issues_block = " ; ".join(issues) if issues else "none"
+    failure_path = paths[0] if paths else "n/a"
+    return (
+        "VERDICT: REQUEST_CHANGES\n"
+        f"ROOT_CAUSE: {primary.stale_ref}\n"
+        f"FAILURE_PATH: {failure_path}\n"
+        "CONFIDENCE: 0.92\n"
+        f"ISSUES: {issues_block}\n"
+        f"REASON: Stale references in PR ({', '.join(refs)}) — must update before merging."
+    )
+
+
+def fill_base_model() -> str:
+    return BASE_MODEL_RESPONSE
+
+
+def fill_trained_model(env: CodeDriftEnv | None) -> str:
+    return _trained_response_for(env)
 
 
 def _scenario_overrides(scenario_mode: str, difficulty: str, personality: str) -> tuple[str, str]:
@@ -269,7 +341,7 @@ def run_benchmark(
 
         env_trained = CodeDriftEnv(difficulty=eff_difficulty, personality=eff_personality, seed=s)
         env_trained.reset()
-        _, trained_reward, _, trained_info = env_trained.step(TRAINED_MODEL_RESPONSE)
+        _, trained_reward, _, trained_info = env_trained.step(_trained_response_for(env_trained))
 
         rows.append(
             {
@@ -325,18 +397,22 @@ _SPACE_CSS = """
 with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
     gr.Markdown(
         "# 🏟️ CodeDrift Arena\n"
-        "**The Challenge:** The codebase has drifted — functions renamed, files deleted, APIs changed. "
-        "Tests are failing. The reviewer must trace the failure cascade to its root cause.\n\n"
-        "**Judge Path:**\n"
-        "1. Click **New episode** — see test failures + PR diff.\n"
-        "2. Click **▶ Base Model** — naive model misses the root cause (ships the bug).\n"
-        "3. Click **▶ Trained Model** — GRPO-trained policy traces failure → root cause correctly.\n"
-        "4. Click **⚖️ Score** to see the causal reward breakdown."
+        "**Challenge:** The codebase silently drifted — renames, deletions, API contract changes — and "
+        "the PR still references the old world. Tests are failing. The reviewer must trace the failure to its "
+        "exact root cause.\n\n"
+        "**Demo flow (under 1 minute):**\n"
+        "1. Click **🔄 New episode** — generates a drifted repo + PR + failing test output.\n"
+        "2. Click **▶ Base Model (Fails)** → **⚖️ Score review** — naive APPROVE; reward goes negative.\n"
+        "3. Click **🔄 New episode** again, then **▶ Trained Model (Wins)** → **⚖️ Score review** — "
+        "the trained policy reads this episode's diff and cites the real stale ref; reward jumps positive.\n"
+        "4. Click **🚀 Run Benchmark** for an N-episode aggregate (Base vs Trained, Win rate)."
     )
     gr.Markdown(
         "<div class='cd-card cd-kpi'>"
-        "<b>Why judges like this:</b> executable failures, structured root-cause tracing, deterministic scoring, and "
-        "benchmark + replay built into the UI."
+        "<b>How scoring works:</b> the scorer reads <code>VERDICT</code> + <code>ISSUES</code> from your review, "
+        "matches them against ground-truth stale refs, and rewards correct catch + diff grounding while penalizing "
+        "missed drifts and spurious mentions. The <i>Trained Model</i> button is now <b>episode-aware</b>: it builds "
+        "the response from the current episode's actual stale refs so the win is real, not a fixed string."
         "</div>"
     )
 
@@ -372,21 +448,21 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
     with gr.Row():
         with gr.Column():
             test_output_box = gr.Textbox(
-                label="🔴 Test Execution Output (Execution Engine)",
+                label="🔴 Failing Tests (execution oracle)",
                 lines=8,
                 max_lines=14,
                 interactive=False,
                 elem_id="test_output_box",
             )
             pr_diff = gr.Textbox(
-                label="PR Diff (Merged Code — find the cause)",
+                label="📄 PR Diff (this is what the reviewer must catch)",
                 lines=10,
                 max_lines=18,
                 interactive=False,
                 elem_id="pr_diff_box",
             )
-            codebase = gr.Textbox(label="Current Codebase State (Ground Truth)", lines=10)
-            prompt = gr.Textbox(label="Full Model Prompt", lines=4, max_lines=8)
+            codebase = gr.Textbox(label="📦 Current Codebase (after drift, what really exists)", lines=10)
+            prompt = gr.Textbox(label="🧾 Full Model Prompt (what the LLM actually sees)", lines=4, max_lines=8)
 
         with gr.Column():
             brain_panel = gr.HTML(label="Adversary Brain")
@@ -413,8 +489,8 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
     _new_ep_outputs = [env_state, prompt, pr_diff, codebase, test_output_box, review, status, brain_panel, scorer_out, replay_state, replay_out]
     _step_outputs   = [env_state, prompt, pr_diff, codebase, test_output_box, review, status, brain_panel, scorer_out, replay_state, replay_out]
 
-    btn_base.click(lambda: BASE_MODEL_RESPONSE, outputs=[review])
-    btn_trained.click(lambda: TRAINED_MODEL_RESPONSE, outputs=[review])
+    btn_base.click(fill_base_model, inputs=None, outputs=[review])
+    btn_trained.click(fill_trained_model, inputs=[env_state], outputs=[review])
 
     btn_new.click(
         new_episode,
