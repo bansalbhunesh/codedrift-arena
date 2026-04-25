@@ -235,6 +235,23 @@ def verbosity_penalty(issues_norm: str, pr_diff: str) -> tuple[float, dict]:
     return pen, meta
 
 
+# Patterns that are harder to spot than a plain rename — earn extra credit when caught.
+HARD_PATTERNS: frozenset[str] = frozenset({"condition_flip", "off_by_one"})
+
+# Expected runtime exception / error-type keywords for each bug pattern.
+# A reviewer that names the error type demonstrates genuine causal understanding.
+_EXPECTED_ERRORS: dict[str, list[str]] = {
+    "rename":         ["attributeerror", "nameerror"],
+    "partial_rename": ["attributeerror", "nameerror"],
+    "removal":        ["modulenotfounderror", "importerror"],
+    "contract":       ["typeerror", "missing required"],
+    "null_missing":   ["attributeerror", "nonetype", "none"],
+    "type_mismatch":  ["typeerror", "valueerror"],
+    "condition_flip": ["valueerror", "assertionerror", "wrong", "incorrect", "inverted"],
+    "off_by_one":     ["indexerror", "keyerror", "wrong page", "0-based", "1-based", "index"],
+}
+
+
 class RewardScorer:
     R_CAUGHT_STALE = 1.0
     R_CORRECT_APPROVE = 0.5
@@ -247,6 +264,11 @@ class RewardScorer:
     R_ROOT_CAUSE_CORRECT = 0.5
     R_FAILURE_PATH_CREDIT = 0.25
     R_CONFIDENCE_CALIBRATED = 0.1
+    # Rich signal — qualitative depth bonuses
+    R_ERROR_TYPE_NAMED = 0.15   # reviewer identifies the runtime exception type
+    R_HARD_PATTERN_BONUS = 0.25  # extra for condition_flip / off_by_one (subtle bugs)
+    R_COMPLETENESS_BONUS = 0.20  # all stale refs caught in a multi-ref (n>=2) episode
+    R_FORMAT_COMPLETE = 0.05    # all 6 required fields present and non-empty
 
     @staticmethod
     def _parse_issues_section(response: str) -> str | None:
@@ -485,13 +507,29 @@ class RewardScorer:
         info["causal_reasoning"] = causal_info
         # ── End causal bonus ──────────────────────────────────────────────────
 
+        # ── Rich signal bonuses (qualitative depth) ──────────────────────────
+        rich_bonus, rich_info = self._rich_signal_bonus(
+            agent_response=agent_response,
+            actions=actions,
+            caught_keys=info["caught"],
+            episode_outcome=info["episode_outcome"] or "",
+        )
+        if rich_bonus > 0:
+            total += rich_bonus
+            info["breakdown"]["rich_bonus"] = rich_bonus
+        info["rich_signal"] = rich_info
+        # ─────────────────────────────────────────────────────────────────────
+
+        info["reward"] = round(total, 4)
+
         mal = "yes" if info["malformed_issues"] else "no"
         verb = f" | verbosity_pen={info['breakdown'].get('verbosity_penalty', 0):+.2f}" if vpen else ""
         causal_str = f" | causal={causal_bonus:+.2f}" if causal_bonus else ""
+        rich_str = f" | rich={rich_bonus:+.2f}" if rich_bonus else ""
         info["metric_strip"] = (
             f"reward={total:+.2f} | recall={info['recall']:.0%} | verdict={verdict} | "
             f"malformed_issues={mal} | grounded_in_diff={ng}/{n} | spurious={len(info['spurious_mentions'])}"
-            f"{verb}{causal_str}"
+            f"{verb}{causal_str}{rich_str}"
         )
         info["judge_emoji"] = verdict_emoji(info, total)
         info["judge_summary"] = judge_summary_line(info, total)
@@ -500,6 +538,87 @@ class RewardScorer:
         info["judge_keyword_line"] = judge_keyword_line(info)
 
         return total, info
+
+    # ── Rich signal helpers ───────────────────────────────────────────────────
+
+    def _rich_signal_bonus(
+        self,
+        agent_response: str,
+        actions: list[DriftAction],
+        caught_keys: list[str],
+        episode_outcome: str,
+    ) -> tuple[float, dict]:
+        """
+        Four additive bonuses that reward qualitative depth of the review:
+
+        1. Error-type identification  — names the expected runtime exception
+        2. Hard-pattern bonus         — condition_flip / off_by_one are subtle
+        3. Completeness bonus         — all refs caught in a multi-ref episode
+        4. Format completeness        — all 6 required fields present
+
+        None of these bonuses modify the base catch/miss signal. They exist to
+        widen the reward gap between shallow ("stale ref exists") and deep
+        ("this will raise AttributeError because the function was renamed")
+        responses, giving GRPO a richer gradient to train against.
+        """
+        bonus = 0.0
+        info: dict = {}
+
+        full_norm = _normalize_issues_text(agent_response.replace("\n", " "))
+
+        # 1. Error type identification — at least one expected error type appears
+        #    in the full response for every *caught* action.
+        type_hits = 0
+        for action in actions:
+            key = self._stale_key(action)
+            if key not in caught_keys:
+                continue
+            pat = action.bug_pattern or action.drift_type
+            expected = _EXPECTED_ERRORS.get(pat, [])
+            if expected and any(e in full_norm for e in expected):
+                type_hits += 1
+        n_caught = len(caught_keys)
+        if n_caught > 0 and type_hits == n_caught:
+            bonus += self.R_ERROR_TYPE_NAMED
+            info["error_type_named"] = True
+        else:
+            info["error_type_named"] = False
+            info["error_type_hits"] = f"{type_hits}/{n_caught}"
+
+        # 2. Hard pattern bonus — extra for catching condition_flip / off_by_one
+        hard_caught = sum(
+            1 for a in actions
+            if (a.bug_pattern or a.drift_type) in HARD_PATTERNS
+            and self._stale_key(a) in caught_keys
+        )
+        if hard_caught > 0:
+            hard_b = self.R_HARD_PATTERN_BONUS * hard_caught
+            bonus += hard_b
+            info["hard_pattern_bonus"] = round(hard_b, 3)
+        else:
+            info["hard_pattern_bonus"] = 0.0
+
+        # 3. Completeness — all refs caught in a multi-ref episode
+        if len(actions) >= 2 and n_caught == len(actions):
+            bonus += self.R_COMPLETENESS_BONUS
+            info["completeness_bonus"] = True
+        else:
+            info["completeness_bonus"] = False
+
+        # 4. Format completeness — all 6 required fields present and non-empty
+        _REQUIRED_FIELDS = ["VERDICT", "ROOT_CAUSE", "FAILURE_PATH", "CONFIDENCE", "ISSUES", "REASON"]
+        fields_found = [
+            f for f in _REQUIRED_FIELDS
+            if re.search(rf"^{f}\s*:\s*\S", agent_response, re.IGNORECASE | re.MULTILINE)
+        ]
+        if len(fields_found) == len(_REQUIRED_FIELDS):
+            bonus += self.R_FORMAT_COMPLETE
+            info["format_complete"] = True
+        else:
+            info["format_complete"] = False
+            info["fields_found"] = len(fields_found)
+
+        return round(bonus, 4), info
 
     def _mentioned(self, action: DriftAction, issues_norm: str) -> bool:
         """

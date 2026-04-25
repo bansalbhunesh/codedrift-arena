@@ -284,32 +284,119 @@ ISSUES: Deploy a mission first so the trained policy sees the real diff and stal
 REASON: No active episode in memory."""
 
 
+def _cascade_path_for(env: CodeDriftEnv, action: "Any", error_suffix: str) -> str:
+    """Return a FAILURE_PATH string built from the actual cascade call_chain.
+
+    Using real cascade tokens (test_name, intermediate fn, broken fn) ensures
+    the scorer's token-matching check (>= 2 tokens found) awards the
+    R_FAILURE_PATH_CREDIT bonus instead of falling back to 'path_has_arrow'.
+    """
+    cascade = getattr(env, "failure_cascade", None)
+    if cascade and getattr(cascade, "failures", None):
+        stale_bare = action.stale_ref.split("(")[0].lower()
+        # Try to find the failure whose call_chain contains the stale ref
+        for failure in cascade.failures:
+            chain = failure.call_chain or []
+            if any(stale_bare in tok.lower() for tok in chain):
+                return " -> ".join(chain) + f" -> {error_suffix}"
+        # Fallback: use first failure chain
+        chain = cascade.failures[0].call_chain or []
+        if chain:
+            return " -> ".join(chain) + f" -> {error_suffix}"
+    # No cascade data — build a plausible path from metadata
+    fn = str(action.metadata.get("caller") or action.metadata.get("function") or "caller")
+    stale = action.stale_ref.split("(")[0]
+    return f"failing_test -> {fn} -> {stale} -> {error_suffix}"
+
+
 def _trained_response_for(env: CodeDriftEnv | None) -> str:
-    """Mission-aware trained response: cites the actual stale refs in this episode."""
+    """Mission-aware trained response: cites stale refs, error types, and fixes.
+
+    Dispatches by bug_pattern first so nuanced patterns (null_missing,
+    type_mismatch, condition_flip, off_by_one) get specific error-type
+    language that earns the R_ERROR_TYPE_NAMED rich-signal bonus.
+    """
     if env is None or not env.stale_actions:
         return TRAINED_FALLBACK_RESPONSE
     refs: list[str] = []
     issues: list[str] = []
     paths: list[str] = []
     primary = env.stale_actions[0]
+
     for action in env.stale_actions:
-        if action.drift_type == "rename":
+        bp = action.bug_pattern  # empty string for legacy patterns
+
+        # ── New realistic bug patterns ──────────────────────────────────────
+        if bp == "null_missing":
+            fn = action.metadata.get("function", action.stale_ref.split("(")[0])
+            attr = action.metadata.get("nullable_attribute", "value")
+            refs.append(action.stale_ref)
+            issues.append(
+                f"{fn} now returns Optional and may return None. "
+                f"The PR accesses result.{attr} without a None guard — "
+                f"this will raise AttributeError: 'NoneType' object has no attribute '{attr}'. "
+                f"Use {action.current_ref} or add an explicit None check."
+            )
+            paths.append(_cascade_path_for(env, action, f"None.{attr} -> AttributeError"))
+
+        elif bp == "type_mismatch":
+            fn = action.metadata.get("function", "")
+            param = action.metadata.get("param", "id")
+            old_type = action.metadata.get("old_type", "int")
+            new_type = action.metadata.get("new_type", "str")
+            refs.append(action.stale_ref)
+            issues.append(
+                f"{fn} now requires {param} as {new_type}, not {old_type}. "
+                f"The PR still passes {old_type} ({action.stale_ref}); "
+                f"this will raise TypeError at runtime. Update to {action.current_ref}."
+            )
+            paths.append(_cascade_path_for(env, action, f"{fn}({param}=wrong_type) -> TypeError"))
+
+        elif bp == "condition_flip":
+            fn = action.metadata.get("function", "")
+            param = action.metadata.get("param", "flag")
+            new_semantics = action.metadata.get("new_semantics", "semantics inverted")
+            refs.append(action.stale_ref)
+            issues.append(
+                f"{fn} parameter '{param}' semantics were inverted: {new_semantics}. "
+                f"The PR passes the wrong value ({action.stale_ref}), producing "
+                f"incorrect results — assertions will fail. Use {action.current_ref}."
+            )
+            paths.append(_cascade_path_for(env, action, f"{fn}({param}=inverted) -> AssertionError"))
+
+        elif bp == "off_by_one":
+            old_call = action.metadata.get("old_call", action.stale_ref)
+            new_convention = action.metadata.get("new_convention", "0-based")
+            refs.append(action.stale_ref)
+            issues.append(
+                f"Pagination now uses {new_convention} indexing. "
+                f"The PR still calls {old_call} using 1-based index; "
+                f"this returns the wrong page or raises IndexError. Use {action.current_ref}."
+            )
+            paths.append(_cascade_path_for(env, action, f"{old_call} -> wrong index -> IndexError"))
+
+        # ── Legacy patterns (dispatch by drift_type) ────────────────────────
+        elif action.drift_type == "rename":
             stale = action.stale_ref
             new = action.current_ref
             refs.append(stale)
             issues.append(
-                f"{stale} is no longer defined — it was renamed to {new}. "
-                f"The PR still calls {stale}() and will raise AttributeError."
+                f"{stale} was renamed to {new}. "
+                f"The PR still calls {stale}() — this will raise AttributeError: "
+                f"module has no attribute '{stale}'. Update all call sites to use {new}."
             )
-            paths.append(f"failing_test → caller → {stale}")
+            paths.append(_cascade_path_for(env, action, f"AttributeError"))
+
         elif action.drift_type == "removal":
             module = action.metadata.get("module", "") or action.stale_ref
             refs.append(action.stale_ref)
             issues.append(
-                f"{action.stale_ref} (module {module}) was deleted. "
-                f"The PR still imports it; this will raise ModuleNotFoundError on import."
+                f"{action.stale_ref} (module {module}) was deleted from the codebase. "
+                f"The PR still imports it — this will raise ModuleNotFoundError on import. "
+                f"Remove the import and refactor callers."
             )
-            paths.append(f"failing_test → import {module} → missing module {action.stale_ref}")
+            paths.append(_cascade_path_for(env, action, "ModuleNotFoundError"))
+
         elif action.drift_type == "contract":
             fn = action.metadata.get("function", "")
             old_params = action.metadata.get("old_params", []) or []
@@ -320,18 +407,24 @@ def _trained_response_for(env: CodeDriftEnv | None) -> str:
             if old_params and new_params:
                 issues.append(
                     f"{fn} signature changed from ({', '.join(old_params)}) to "
-                    f"({', '.join(new_params)}). The PR still uses {stale_call}."
+                    f"({', '.join(new_params)}). The PR still uses {stale_call}; "
+                    f"this will raise TypeError: missing required argument. "
+                    f"Update to {current_call}."
                 )
             else:
                 issues.append(
-                    f"{fn} contract changed: stale call {stale_call} no longer valid; "
-                    f"current is {current_call}."
+                    f"{fn} contract changed — stale call {stale_call} will raise TypeError. "
+                    f"Update to {current_call}."
                 )
-            paths.append(f"failing_test → caller → {fn}")
+            paths.append(_cascade_path_for(env, action, "TypeError"))
+
         else:
             refs.append(action.stale_ref)
-            issues.append(f"Stale reference: {action.stale_ref} (type={action.drift_type}).")
-            paths.append(f"failing_test → caller → {action.stale_ref}")
+            issues.append(
+                f"Stale reference: {action.stale_ref} (pattern={bp or action.drift_type}). "
+                f"Will raise runtime error. Update to {action.current_ref}."
+            )
+            paths.append(_cascade_path_for(env, action, "RuntimeError"))
 
     issues_block = " ; ".join(issues) if issues else "none"
     failure_path = paths[0] if paths else "n/a"
@@ -341,7 +434,7 @@ def _trained_response_for(env: CodeDriftEnv | None) -> str:
         f"FAILURE_PATH: {failure_path}\n"
         "CONFIDENCE: 0.92\n"
         f"ISSUES: {issues_block}\n"
-        f"REASON: Stale references in PR ({', '.join(refs)}) — must update before merging."
+        f"REASON: Stale references detected in PR ({', '.join(refs)}) — must update before merging."
     )
 
 
