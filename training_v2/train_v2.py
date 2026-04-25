@@ -210,7 +210,7 @@ def train(args: argparse.Namespace) -> None:
         n_episodes=args.episodes,
         seed=args.seed,
         allowed_patterns=TRAIN_PATTERNS,
-        use_curriculum=bool(args.curriculum),
+        use_curriculum=not bool(args.no_curriculum),
     )
     eval_split_path = out_dir / "v2_dataset.jsonl"
     eval_split_path.write_text(
@@ -240,18 +240,18 @@ def train(args: argparse.Namespace) -> None:
     config = GRPOConfig(
         output_dir=str(out_dir),
         max_steps=args.steps,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        learning_rate=5e-5,
-        warmup_steps=10,
-        logging_steps=5,
-        save_steps=200,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        learning_rate=args.learning_rate,
+        warmup_steps=args.warmup_steps,
+        logging_steps=args.logging_steps,
+        save_steps=args.save_steps,
         report_to="wandb" if args.wandb else "none",
         num_generations=args.num_generations,
-        max_prompt_length=1024,
-        max_completion_length=256,
-        temperature=0.8,
-        bf16=False,
+        max_prompt_length=args.max_prompt_length,
+        max_completion_length=args.max_completion_length,
+        temperature=args.temperature,
+        bf16=bool(args.bf16),
     )
     params = inspect.signature(GRPOTrainer.__init__).parameters
     trainer_kwargs = dict(model=model, reward_funcs=reward_fn, train_dataset=dataset, args=config)
@@ -270,16 +270,39 @@ def train(args: argparse.Namespace) -> None:
 
 
 def parse_args() -> argparse.Namespace:
-    p = argparse.ArgumentParser(description="CodeDrift V2 GRPO trainer")
+    p = argparse.ArgumentParser(
+        description="CodeDrift V2 GRPO trainer",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     p.add_argument("--model", default="Qwen/Qwen2.5-1.5B-Instruct")
     p.add_argument("--backend", choices=["hf", "unsloth"], default="hf")
     p.add_argument("--episodes", type=int, default=200)
     p.add_argument("--steps", type=int, default=100)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--num_generations", type=int, default=4)
+    p.add_argument("--num_generations", type=int, default=4, help="Rollouts per step (lower = faster)")
+    p.add_argument("--per_device_train_batch_size", type=int, default=1)
+    p.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    p.add_argument("--learning_rate", type=float, default=5e-5)
+    p.add_argument("--warmup_steps", type=int, default=10)
+    p.add_argument("--logging_steps", type=int, default=5, help="Higher = less log I/O, faster")
+    p.add_argument("--save_steps", type=int, default=200)
+    p.add_argument("--max_prompt_length", type=int, default=1024)
+    p.add_argument("--max_completion_length", type=int, default=256)
+    p.add_argument("--temperature", type=float, default=0.8)
+    p.add_argument(
+        "--bf16",
+        action="store_true",
+        default=False,
+        help="Use bf16 (recommended on A100 if stable)",
+    )
     p.add_argument("--output_dir", default="outputs/v2")
     p.add_argument("--wandb", action="store_true", default=False)
-    p.add_argument("--curriculum", action="store_true", default=True)
+    p.add_argument(
+        "--no-curriculum",
+        action="store_true",
+        default=False,
+        help="Build dataset with uniform random episodes (faster to generate)",
+    )
     p.add_argument("--dry_run", action="store_true", default=False, help="Build dataset and exit")
     return p.parse_args()
 

@@ -324,18 +324,18 @@ def train(args):
     config = GRPOConfig(
         output_dir=args.output_dir,
         max_steps=args.steps,
-        per_device_train_batch_size=1,
-        gradient_accumulation_steps=4,
-        learning_rate=5e-5,
-        warmup_steps=10,
-        logging_steps=5,
-        save_steps=200,
-        report_to="wandb",
-        num_generations=4,
-        max_prompt_length=1024,
-        max_completion_length=256,
-        temperature=0.8,
-        bf16=False,
+        per_device_train_batch_size=args.per_device_train_batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        learning_rate=args.learning_rate,
+        warmup_steps=args.warmup_steps,
+        logging_steps=args.logging_steps,
+        save_steps=args.save_steps,
+        report_to="none" if args.no_wandb else "wandb",
+        num_generations=args.num_generations,
+        max_prompt_length=args.max_prompt_length,
+        max_completion_length=args.max_completion_length,
+        temperature=args.temperature,
+        bf16=bool(args.bf16),
         # fp16 disabled: GRPOTrainer generates rollouts outside AMP's GradScaler
         # context, causing "No inf checks recorded" assertion in PyTorch 2.x.
         # bitsandbytes already computes in float16 via bnb_4bit_compute_dtype.
@@ -362,7 +362,10 @@ def train(args):
 
 
 def parse_args():
-    p = argparse.ArgumentParser(description="CodeDrift Arena GRPO Training")
+    p = argparse.ArgumentParser(
+        description="CodeDrift Arena GRPO Training",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
     p.add_argument("--model", default=cfg.DEFAULT_MODEL_ID)
     p.add_argument("--difficulty", default="easy", choices=["easy", "medium", "hard"])
     p.add_argument(
@@ -380,6 +383,28 @@ def parse_args():
         "--eval_split_out",
         default="",
         help="Optional path to write held-out eval rows as JSON.",
+    )
+    p.add_argument("--num_generations", type=int, default=4, help="Rollouts per step (lower = faster)")
+    p.add_argument("--per_device_train_batch_size", type=int, default=1)
+    p.add_argument("--gradient_accumulation_steps", type=int, default=4)
+    p.add_argument("--learning_rate", type=float, default=5e-5)
+    p.add_argument("--warmup_steps", type=int, default=10)
+    p.add_argument("--logging_steps", type=int, default=5)
+    p.add_argument("--save_steps", type=int, default=200)
+    p.add_argument("--max_prompt_length", type=int, default=1024)
+    p.add_argument("--max_completion_length", type=int, default=256)
+    p.add_argument("--temperature", type=float, default=0.8)
+    p.add_argument(
+        "--bf16",
+        action="store_true",
+        default=False,
+        help="Use bf16 (recommended on A100 if stable)",
+    )
+    p.add_argument(
+        "--no_wandb",
+        action="store_true",
+        default=False,
+        help="Disable Weights & Biases logging (faster, no login)",
     )
     args = p.parse_args()
     if not 0.0 <= args.heldout_fraction < 1.0:
