@@ -134,10 +134,55 @@ def build_dataset(
     return rows
 
 
+# ── Format fields the V2 reviewer is expected to produce ─────────────────────
+_V2_REQUIRED_FIELDS = ("VERDICT:", "ROOT_CAUSE:", "FAILURE_PATH:", "CONFIDENCE:", "ISSUES:", "REASON:")
+
+
+def _to_text(completion) -> str:
+    """Extract plain text from whatever TRL version passes as a completion.
+
+    TRL ≥0.15 with processing_class returns completions as message-dict lists
+    [[{"role":"assistant","content":"..."}], ...]. Older TRL returns strings.
+    Passing a raw dict to the scorer produces Python repr → no field markers
+    found → MALFORMED_PENALTY (-0.5) on every sample → std=0 → zero gradient.
+    """
+    if isinstance(completion, str):
+        return completion
+    if isinstance(completion, list):
+        for msg in reversed(completion):
+            if isinstance(msg, dict) and msg.get("role") == "assistant":
+                return str(msg.get("content", ""))
+        return " ".join(
+            str(m.get("content", m)) if isinstance(m, dict) else str(m)
+            for m in completion
+        )
+    if isinstance(completion, dict):
+        return str(completion.get("content", str(completion)))
+    return str(completion)
+
+
+def _format_scaffold(text: str) -> float:
+    """Small additive bonus per format field present (max +0.18).
+
+    Creates a gradient bridge between the malformed penalty (−0.5, all fields
+    absent) and a correct answer (+2.0). Without this, a model that outputs
+    the right fields but wrong content has no incentive to learn the format —
+    it gets −0.5 either way and GRPO sees zero advantage within the group.
+
+    +0.03 per field × 6 fields = +0.18 max. A well-formatted wrong answer
+    scores −0.32 vs −0.5 for random garbage — small enough not to reward
+    format alone, large enough to provide a gradient.
+    """
+    upper = text.upper()
+    return min(sum(0.03 for f in _V2_REQUIRED_FIELDS if f in upper), 0.18)
+
+
 def make_reward_fn(
     metrics: MetricsLogger,
     log_step: dict[str, int],
 ):
+    import statistics as _stats
+
     scorer = CausalScorer()
 
     def reward_fn(
@@ -153,26 +198,35 @@ def make_reward_fn(
 
         n = len(completions)
         rewards: list[float] = []
-        for i, completion in enumerate(completions):
+        for i, raw_completion in enumerate(completions):
+            # Fix: extract plain text regardless of TRL completion format
+            completion_text = _to_text(raw_completion)
+
             gt = ground_truth[i] if ground_truth is not None else {}
             er_dict = exec_result[i] if exec_result is not None else {}
             diff = pr_diff[i] if pr_diff is not None else ""
             pat = (patterns[i] if patterns is not None else []) or ["unknown"]
             er = _exec_result_from_dict(er_dict if isinstance(er_dict, dict) else {})
-            prediction = parse_reviewer_output(completion)
-            reward, info = scorer.score(
+            prediction = parse_reviewer_output(completion_text)
+            base_reward, info = scorer.score(
                 prediction=prediction,
                 ground_truth=gt if isinstance(gt, dict) else {},
                 exec_result=er,
                 mutations=[],
                 pr_diff=diff,
             )
-            rewards.append(float(reward))
+            # Format scaffold: gradient bridge from malformed → correct format
+            scaffold = _format_scaffold(completion_text)
+            reward = float(base_reward) + scaffold
+
+            rewards.append(reward)
             comps = info.get("reward_components", {})
             metrics.log(
                 step=log_step["step"],
                 payload={
-                    "reward_total": float(reward),
+                    "reward_total": reward,
+                    "reward_base": float(base_reward),
+                    "reward_scaffold": scaffold,
                     "reward_root_cause": comps.get("root_cause", 0.0),
                     "reward_failure_path": comps.get("failure_path", 0.0),
                     "reward_verdict": comps.get("verdict", 0.0),
@@ -184,6 +238,17 @@ def make_reward_fn(
                 },
             )
             log_step["step"] += 1
+
+        # Variance diagnostic — low std = GRPO can't learn
+        if len(rewards) > 1:
+            rvar = _stats.stdev(rewards)
+            rmean = _stats.mean(rewards)
+            warn = " *** LOW VARIANCE — increase --max_completion_length or --num_generations ***" if rvar < 0.05 else ""
+            log.info(
+                "reward_fn n=%d mean=%.3f std=%.3f min=%.3f max=%.3f%s",
+                n, rmean, rvar, min(rewards), max(rewards), warn,
+            )
+
         return rewards
 
     return reward_fn
@@ -300,7 +365,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--episodes", type=int, default=200)
     p.add_argument("--steps", type=int, default=100)
     p.add_argument("--seed", type=int, default=42)
-    p.add_argument("--num_generations", type=int, default=4, help="Rollouts per step (lower = faster)")
+    # num_generations ≥ 4 required: 2 completions with identical reward → std=0 → zero gradient.
+    p.add_argument("--num_generations", type=int, default=4, help="Rollouts per step — must be ≥4 for reward variance")
     p.add_argument("--per_device_train_batch_size", type=int, default=1)
     p.add_argument("--gradient_accumulation_steps", type=int, default=4)
     p.add_argument("--learning_rate", type=float, default=5e-5)
@@ -308,8 +374,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--logging_steps", type=int, default=5, help="Higher = less log I/O, faster")
     p.add_argument("--save_steps", type=int, default=200)
     p.add_argument("--max_prompt_length", type=int, default=1024)
-    p.add_argument("--max_completion_length", type=int, default=256)
-    p.add_argument("--temperature", type=float, default=0.8)
+    # 384 minimum: a full VERDICT+ROOT_CAUSE+FAILURE_PATH+CONFIDENCE+ISSUES+REASON
+    # response needs 200-400 tokens. Below 256 every completion is truncated →
+    # MALFORMED_PENALTY (-0.5) on all → std=0 → zero GRPO gradient.
+    p.add_argument("--max_completion_length", type=int, default=384)
+    # temperature 1.0: cold base model at 0.8 collapses to near-identical outputs → std=0.
+    p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument(
         "--bf16",
         action="store_true",
