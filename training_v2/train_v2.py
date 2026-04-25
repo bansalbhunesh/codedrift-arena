@@ -241,6 +241,16 @@ def train(args: argparse.Namespace) -> None:
     log_step = {"step": 0}
     reward_fn = make_reward_fn(metrics, log_step)
 
+    # Unsloth fast inference + GRPO generate() can mix bf16 activations with fp32
+    # weights in attention -> "mat1 bfloat16 != mat2 float". hf backend is safe with bf16.
+    use_bf16 = bool(args.bf16)
+    if use_bf16 and args.backend == "unsloth":
+        log.warning(
+            "bf16 is disabled for GRPO when using --backend unsloth (mixed dtypes in "
+            "Unsloth fast generate). Re-run with --backend hf if you need bf16."
+        )
+        use_bf16 = False
+
     config = GRPOConfig(
         output_dir=str(out_dir),
         max_steps=args.steps,
@@ -255,7 +265,7 @@ def train(args: argparse.Namespace) -> None:
         max_prompt_length=args.max_prompt_length,
         max_completion_length=args.max_completion_length,
         temperature=args.temperature,
-        bf16=bool(args.bf16),
+        bf16=use_bf16,
     )
     params = inspect.signature(GRPOTrainer.__init__).parameters
     trainer_kwargs = dict(model=model, reward_funcs=reward_fn, train_dataset=dataset, args=config)
@@ -297,7 +307,7 @@ def parse_args() -> argparse.Namespace:
         "--bf16",
         action="store_true",
         default=False,
-        help="Use bf16 (recommended on A100 if stable)",
+        help="Use bf16 in GRPO (use with --backend hf; ignored for unsloth — see train_v2)",
     )
     p.add_argument("--output_dir", default="outputs/v2")
     p.add_argument("--wandb", action="store_true", default=False)
