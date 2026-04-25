@@ -194,9 +194,13 @@ def train(args: argparse.Namespace) -> None:
     out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = out_dir / "metrics_v2.jsonl"
+    # TRL's GRPOTrainer already does report_to="wandb" when --wandb. A second
+    # wandb.log(..., step=) from MetricsLogger used per-completion indices (0,1,2,…)
+    # which violates monotonicity vs the trainer's global step — disable W&B here.
+    # Per-component reward rows remain in metrics_v2.jsonl.
     metrics = MetricsLogger(
         output_path=metrics_path,
-        use_wandb=bool(args.wandb),
+        use_wandb=False,
         extra={
             "model": args.model,
             "patterns": TRAIN_PATTERNS,
