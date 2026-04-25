@@ -60,24 +60,54 @@ After enough rounds, the policy gets **better at causal debugging**, not at memo
 - **Execution-based truth** — Tests pass or fail; no hand-labeled “correct” sentence.
 - **Causal debugging** — Reward pushes **path-shaped** answers, not “test failed” alone.
 - **Adversarial loop** — Adversary styles + adaptive curriculum: harder bugs when the reviewer is strong.
-- **Difficulty scaling** — Levels (e.g. easy → hard) and multiple adversary **personalities** (including adaptive).
+- **Difficulty scaling** — Levels (easy → hard) and multiple adversary **personalities** (including adaptive).
 
 ---
 
-## Hackathon / track theme fit (estimated)
+## Primary track (for judges): Theme **#3.1 — World Modeling (Professional Tasks)**
 
-These percentages are a **rough** split of where the *emphasis* sits—not a formal metric.
+**This submission is positioned as a professional-task world model:** the agent must maintain a coherent picture of a **dynamic codebase**, use a **real execution oracle** (failing tests), and **ground** its review in **causal structure** (what broke, where, and why)—not in surface style or memorized approvals. The environment is **partially observable** (the reviewer sees diff + test output + current tree, not an omniscient label), and **rewards** reward **correct beliefs** about stale references and failure paths. That is the core of **world modeling for software engineering**, not chat or personalization.
 
-| Track | % | Why |
-|-------|---|-----|
-| **#3.1 — World modeling (professional tasks)** | **~42%** | Real repo + tools (pytest), partial observability, state that updates on actions, **causal** reward—not pattern-matching. |
-| **#4 — Self-improvement** | **~28%** | Adaptive curriculum, replay of hard episodes, difficulty promotion, generator vs reviewer co-evolution. |
-| **#5 — Wild card** | **~12%** | “Schema drift + PR review + RL” is a distinct, high-value story for LLM training. |
-| **#1 — Multi-agent** | **~10%** | Clear **adversary vs reviewer** loop; not negotiation, markets, or coalitions. |
-| **#2 — Long-horizon planning** | **~8%** | Each episode is **one step** for clean credit assignment; long chains are a natural extension. |
-| **#3.2 — Personalized tasks** | **0%** | Out of scope. |
+*Secondary angle (one line):* **#4 Self-improvement** shows up in the **adaptive** adversary and curriculum (the world **reacts** when the reviewer gets stronger)—but the **primary** story for evaluation is **#3.1**.
 
-If you have to name **one** track: **#3.1** is the closest fit, with **#4** a strong second.
+---
+
+## Modes & knobs (what everything does)
+
+**Mission level** (how many distinct drift mutations are stacked per episode, before personality sampling):
+
+| Level | Drifts / episode |
+|-------|------------------|
+| **easy** | 1 |
+| **medium** | 2 |
+| **hard** | 3 |
+
+**Scenario preset** (overrides the two dropdowns below it for quick presets):
+
+| Preset | Effect |
+|--------|--------|
+| **Random** | Uses your chosen **mission level** and **adversary style** as-is. |
+| **Edge cases** | Forces **medium** difficulty + **subtle** adversary (harder, contract-biased bugs). |
+| **Hard mode** | Forces **hard** + **adaptive** (strongest challenge in one click). |
+
+**Adversary style** (how the drift agent **samples** bug types; same env API, different opponent):
+
+| Style | Behavior |
+|-------|----------|
+| **random** | Samples from the full pattern pool: rename, removal, contract, partial_rename, null_missing, type_mismatch, condition_flip, off_by_one. |
+| **subtle** | Biases toward **contract**-style changes (harder to spot); still respects easy/medium/hard **counts**. |
+| **aggressive** | Only **rename / removal / contract**—loud, structural breaks. |
+| **escalating** | **More** mutations per episode as the run count increases (capped by pool size). |
+| **adaptive** | Uses reviewer **win-rate** to switch between aggressive, balanced, and subtle pressure; can target **weaker** bug families more often. The **Adversary brain** panel in the UI summarizes this when this mode is active. |
+
+**Space-only features (Mission tab UI)**
+
+- **Run / Outcome** — Left: parameters + **Deploy mission** + **Quick benchmark** (N episodes, base vs “trained” template). Right: **status strip** (ready / active / error).
+- **Context** — Failing test output, PR diff, codebase snapshot, and full **prompt** the model would see.
+- **Review** — **Load Junior** = fixed baseline `APPROVE` text; **Load Senior** = **episode-aware** structured response from **ground-truth** stale refs (wins for demos). **Submit review** runs the scorer.
+- **Failure cascade** — Visual **test → … → stale ref** chain per bug (deeper = harder to trace).
+- **Score breakdown (JSON)** — Full scorer output; **mission log** — last few scored rows.
+- **Reset stats** — Clears XP / streak / production HUD without redeploying.
 
 ---
 
@@ -142,21 +172,55 @@ V1 is kept for backward compatibility; new work targets **V2** paths in `env_v2/
 
 ---
 
-## How to run
+## How to use the live demo (Hugging Face Space)
 
-### 1) Live Space (no install)
+**URL:** [huggingface.co/spaces/Bhuneshlooper/CodeDrift](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) — no install.
 
-**[Bhuneshlooper/CodeDrift on Hugging Face](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift)**
+### Quick start (Mission — full loop)
 
-| Tab | What you do |
-|-----|-------------|
-| **Mission** | Set difficulty & adversary → **Deploy mission** → **Load Junior / Senior** → **Submit review** → see score, JSON, log. |
-| **Battle** | Same seed & settings → **Run Battle** (Junior vs Senior on one bug) or **Run Gauntlet** (best-of-N). |
-| **Leaderboard** | **Run Leaderboard** for N episodes → metrics, bar charts, per-mission table. |
-| **Real PR** | Paste a diff or **fetch from GitHub** → adjust stale refs → **Score**. |
-| **About** | How training and scoring are set up. |
+1. Open the **Mission** tab.
+2. Set **mission level**, **adversary style**, **scenario preset** (or leave **Random**), and **seed** (reproducible bugs).
+3. Click **Deploy mission** — the **Outcome** panel shows *Active* with an episode id; **Context** fills with failing tests, diff, and codebase.
+4. Click **Load Junior** to paste a naïve baseline review, or **Load Senior** for a structured response aligned with this episode’s real stale references.
+5. Edit the **Reviewer report** if you like, then **Submit review** — the banner shows **XP**, **caught / missed** stale refs, and the **JSON** box shows the full score.
+6. Use **Reset stats** if you only want to clear the top HUD (XP, streak, production health) without changing the mission.
 
-### 2) Local (CPU) — env + tests + Gradio
+**Quick benchmark (same tab)** — After choosing settings, set **Benchmark size** and click **Quick benchmark** to run **N** episodes and compare baseline vs “Senior”-style response **in the aggregate** (summary appears in **Outcome** / scorer output depending on build).
+
+### Battle tab — what it is (headline for judges)
+
+**Battle** is a **controlled A/B** on the **exact same bug**: one **seed**, one **mission level**, one **adversary** — two independent environment resets, **identical** episode.
+
+- **Run Battle**  
+  - **Junior** = fixed canned `APPROVE` review (ships the bug).  
+  - **Senior** = template filled from this episode’s **ground-truth** stale refs and failure information.  
+  - You get a **side-by-side** card: both reviews, both rewards, **delta** (training advantage in reward / XP), plus **failure path** and bug **pattern** label. **Detail (JSON)** has numeric breakdown.
+
+*Why it’s impressive:* In one click you show **the same PR and tests**, **only** the review text changes, and the scorer **splits** the models—no cherry-picked seeds in the UI.
+
+**Gauntlet (best-of-N)** — **Run Gauntlet** runs **3–10** consecutive episodes (`seed`, `seed+1`, …) with the same difficulty/adversary. You get a **table** of rounds (pattern, stale ref, Junior vs Senior reward) and a **wins** count. Use this to show **consistency** of the gap, not a single lucky seed.
+
+### Leaderboard tab
+
+1. Set **Missions in this run**, **Seed**, **Mission level**, **Adversary style**.  
+2. **Run Leaderboard** — same **N** missions for Junior and Senior policies.  
+3. You get **summary tiles** (avg XP, recall, win rate, ties), **bar charts** (per-episode and per **bug family**), and a **per-mission table** (deltas, stale refs). Best for “paper-ready” **aggregate** comparisons.
+
+### Real PR tab
+
+1. **Diff & detection** — Paste a **unified diff**, or paste a **GitHub URL** and **Fetch from GitHub**.  
+2. **Detect languages + candidate stale refs** helps pre-fill candidates (heuristic; **edit** the list).  
+3. **Review & score** — Paste your `VERDICT` / `ISSUES` / etc., choose **drift kind** for scoring, **Score real PR**. This path uses the **V1-style** real-diff scorer (does **not** run the project’s full pytest for arbitrary repos; see on-tab note).
+
+### About tab
+
+Short explanation of **setup**, **reward**, **training**, and **evaluation** in plain language.
+
+---
+
+## How to run locally
+
+### 1) Clone, tests, and Gradio (CPU) — env + tests + Gradio
 
 ```bash
 git clone https://github.com/bansalbhunesh/codedrift-arena.git
@@ -168,7 +232,7 @@ python -m unittest discover -s tests_v2 -p "test_*.py" -v
 python app.py   # Gradio
 ```
 
-### 3) OpenEnv HTTP server
+### 2) OpenEnv HTTP server
 
 ```bash
 pip install -r requirements-server.txt
@@ -177,7 +241,7 @@ uvicorn server.app:app --host 0.0.0.0 --port 8000
 
 V2 app builder: `integrations.codedrift_openenv_v2.build_openenv_app_v2()` (mount under `/api/v2/…` as in source).
 
-### 4) Training
+### 3) Training
 
 ```bash
 pip install -r requirements-train.txt
