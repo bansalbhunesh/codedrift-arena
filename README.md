@@ -17,9 +17,12 @@ A **generator** mutates a mini-repo (renames, removals, contract changes, and mo
 | | |
 |--|--|
 | **Live demo** | [![Hugging Face Space](https://img.shields.io/badge/🤗%20HuggingFace-Space-blue)](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) |
+| **Interactive slides** | [Open in browser](https://cdn.jsdelivr.net/gh/bansalbhunesh/codedrift-arena@main/docs/readme-slides.html) — Reveal.js deck (← →, **Esc** overview). Source: [`docs/readme-slides.html`](docs/readme-slides.html) |
 | **Source** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
 | **Stack** | Python · Gradio (CPU Space) · FastAPI + `openenv-core` (HTTP) · TRL **GRPO** + QLoRA (GPU train) · **pytest** as execution oracle (V2) |
 | **Tests** | 60+ unit tests (v1 + v2) |
+
+> **Note:** GitHub’s `README.md` is static. The slide deck is a normal HTML file you can open **locally** (`docs/readme-slides.html`) or via the link above (served from jsDelivr after `main` has the file).
 
 ---
 

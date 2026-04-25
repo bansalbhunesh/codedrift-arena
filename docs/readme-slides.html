@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CodeDrift Arena — interactive overview</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.0/dist/reveal.css" />
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/reveal.js@4.6.0/dist/theme/black.css" id="theme" />
+  <style>
+    :root {
+      --cd-accent: #5b7cfa;
+      --cd-mute: #9aa3b2;
+    }
+    .reveal h1, .reveal h2, .reveal h3 { text-transform: none; font-weight: 600; letter-spacing: -0.02em; }
+    .reveal h1 { font-size: 2.2em; }
+    .reveal .cd-muted { color: var(--cd-mute); font-size: 0.85em; }
+    .reveal .cd-accent { color: var(--cd-accent); }
+    .reveal .cd-badges { display: flex; flex-wrap: wrap; gap: 0.5rem; justify-content: center; margin-top: 1.5rem; }
+    .reveal .cd-badges a {
+      display: inline-block; padding: 0.35rem 0.75rem; border: 1px solid #2a3040; border-radius: 999px;
+      font-size: 0.75rem; color: #c8d0e0; text-decoration: none; background: #12141a;
+    }
+    .reveal .cd-badges a:hover { border-color: var(--cd-accent); color: #fff; }
+    .reveal .cd-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem; text-align: left; font-size: 0.7em; max-width: 38rem; margin: 0 auto; }
+    .reveal .cd-card {
+      background: #161a22; border: 1px solid #2a3040; border-radius: 8px; padding: 0.6rem 0.8rem;
+    }
+    .reveal .cd-card strong { color: var(--cd-accent); }
+    .reveal .cd-footer { position: fixed; bottom: 12px; left: 0; right: 0; font-size: 0.45em; color: #5c6570; }
+    .reveal pre { width: 100%; font-size: 0.5em; text-align: left; background: #0d0f14; border-radius: 6px; padding: 0.6rem; }
+  </style>
+</head>
+<body>
+  <div class="reveal">
+    <div class="slides">
+      <section>
+        <h1>CodeDrift Arena</h1>
+        <p class="cd-muted">Train code-review models on <span class="cd-accent">real drift</span> — not style scores.</p>
+        <div class="cd-badges">
+          <a href="https://huggingface.co/spaces/Bhuneshlooper/CodeDrift" target="_blank" rel="noreferrer">Open Space ↗</a>
+          <a href="https://github.com/bansalbhunesh/codedrift-arena" target="_blank" rel="noreferrer">GitHub ↗</a>
+        </div>
+        <p class="cd-footer">← → space · <kbd>Esc</kbd> overview · open README.md for full detail</p>
+      </section>
+
+      <section>
+        <h2>What’s wrong?</h2>
+        <p class="fragment">The <strong>codebase already changed</strong> (rename, delete, new contract)…</p>
+        <p class="fragment">…but the <strong>PR still calls the old API</strong>. Looks fine in isolation.</p>
+        <p class="fragment">Tests <strong>fail</strong> for real. That’s the <span class="cd-accent">ground truth</span>.</p>
+      </section>
+
+      <section>
+        <h2>One loop</h2>
+        <ol style="text-align: left; max-width: 28rem; margin: 0 auto; font-size: 0.75em; line-height: 1.6;">
+          <li class="fragment">Generator <strong>plants</strong> a change.</li>
+          <li class="fragment">A PR still references the <strong>stale</strong> world.</li>
+          <li class="fragment"><strong>Pytest</strong> runs → failure output is shown to the model.</li>
+          <li class="fragment">Reviewer must <strong>name</strong> the bug, <strong>trace</strong> the path, <strong>block</strong> the merge.</li>
+          <li class="fragment">Scorer returns reward → <strong>GRPO</strong> updates the policy.</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>Four pieces</h2>
+        <div class="cd-grid">
+          <div class="cd-card fragment"><strong>Generator</strong> — mutates a mini-repo (AST-level patterns).</div>
+          <div class="cd-card fragment"><strong>Execution</strong> — real test run; failing output = oracle.</div>
+          <div class="cd-card fragment"><strong>Reviewer</strong> — LLM; structured report (verdict, root cause, path…).</div>
+          <div class="cd-card fragment"><strong>Scorer</strong> — causal, anti-hallucination, calibration.</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Judges: one theme</h2>
+        <p style="max-width: 32rem; margin: 0 auto; font-size: 0.75em; line-height: 1.55;">
+          <span class="cd-accent">Theme #3.1 — World modeling (professional tasks):</span><br />
+          the agent must hold a <strong>consistent world model</strong> of a changing codebase, use
+          <strong>tool-grounded evidence</strong> (tests), and get rewarded for <strong>correct causal beliefs</strong> — not for fluent approval.
+        </p>
+      </section>
+
+      <section>
+        <h2>Live Space: Mission</h2>
+        <ol style="text-align: left; max-width: 30rem; margin: 0 auto; font-size: 0.7em; line-height: 1.65;">
+          <li class="fragment">Pick level + adversary + seed → <strong>Deploy mission</strong></li>
+          <li class="fragment"><strong>Load Junior</strong> (baseline) or <strong>Load Senior</strong> (structured template)</li>
+          <li class="fragment"><strong>Submit review</strong> → XP, banner, JSON breakdown</li>
+        </ol>
+        <p class="fragment cd-muted" style="margin-top: 1.2em; font-size: 0.6em;">See <strong>Failure cascade</strong> + <strong>Adversary brain</strong> (when adaptive) in the same tab.</p>
+      </section>
+
+      <section>
+        <h2>Battle &amp; Leaderboard</h2>
+        <p style="font-size: 0.72em; max-width: 32rem; margin: 0 auto; text-align: left; line-height: 1.55;">
+          <span class="cd-accent">Battle</span> — same bug, same seed: Junior vs Senior side by side, reward delta in one view.<br /><br />
+          <span class="cd-accent">Gauntlet</span> — 3–10 consecutive seeds, scoreboard of wins.<br /><br />
+          <span class="cd-accent">Leaderboard</span> — N missions, bar charts, per-bug-family table.
+        </p>
+      </section>
+
+      <section>
+        <h2>Stack (fast)</h2>
+        <pre><code>Gradio (demo) · FastAPI + OpenEnv · TRL GRPO + QLoRA
+pytest oracle (V2) · 60+ unit tests</code></pre>
+        <p class="cd-muted" style="font-size: 0.55em; margin-top: 1rem;">V1 = pattern arena · V2 = executable + causal reward</p>
+      </section>
+
+      <section>
+        <h2>Next</h2>
+        <p style="font-size: 0.8em;">Read the full <strong>README.md</strong> in the repo for<br />local install, training, OpenEnv, pitfalls.</p>
+        <div class="cd-badges" style="margin-top: 2rem;">
+          <a href="https://huggingface.co/spaces/Bhuneshlooper/CodeDrift" target="_blank" rel="noreferrer">Try the Space ↗</a>
+          <a href="https://github.com/bansalbhunesh/codedrift-arena/blob/main/README.md" target="_blank" rel="noreferrer">Full README ↗</a>
+        </div>
+      </section>
+    </div>
+  </div>
+  <script src="https://cdn.jsdelivr.net/npm/reveal.js@4.6.0/dist/reveal.js"></script>
+  <script>
+    Reveal.initialize({
+      hash: true,
+      history: true,
+      slideNumber: "c/t",
+      transition: "slide",
+      width: 1100,
+      height: 620,
+    });
+  </script>
+</body>
+</html>
