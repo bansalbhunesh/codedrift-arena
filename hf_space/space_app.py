@@ -7,10 +7,10 @@ A mission-control / arcade-HUD reskin of the CodeDrift environment. Judges can:
     - play the Junior-vs-Senior leaderboard, and
     - hunt bugs in real GitHub PRs (multi-language, URL fetch).
 
-The styling is intentionally distinctive: deep navy-charcoal with amber / mint /
-crimson accents, two display faces (Major Mono Display + Chakra Petch), and a
-corner-bracket framing language inspired by 80s mission consoles + arcade HUDs.
-No left-stripe callouts, no gradient text, no generic AI cyberpunk neon.
+Visual + motion: token-based light/dark theme, two display faces (Major Mono
+Display + Chakra Petch), and purposeful CSS-only motion (HUD breathing, scanlines,
+panel entrances) with reduced-motion off switch. No gradient text, no
+decorative left stripe borders.
 """
 
 from __future__ import annotations
@@ -107,7 +107,8 @@ def _hud_html(player: dict[str, Any]) -> str:
         last_pill = "<span class='hud-pill hud-pill-amber'>last: PARTIAL</span>"
 
     return f"""
-<section class="hud" aria-label="Mission HUD">
+<section class="hud hud-ambient" aria-label="Mission HUD">
+  <div class="hud-orbit" aria-hidden="true"></div>
   <div class="hud-row">
     <div class="hud-cell">
       <div class="hud-label">CALLSIGN</div>
@@ -208,7 +209,7 @@ def _status_banner(reward: float, info: dict[str, Any]) -> str:
 
     xp_sign = f"+{xp}" if xp >= 0 else f"{xp}"
     return f"""
-<section class="banner banner-{tone}" role="status" aria-live="polite">
+<section class="banner banner-{tone} banner-anim" role="status" aria-live="polite">
   <header class="banner-head">
     <span class="banner-badge">{icon} {label}</span>
     <span class="banner-xp">{xp_sign} XP</span>
@@ -626,15 +627,25 @@ def run_benchmark(
     tie_count = sum(1 for r in rows if r["trained_reward"] == r["base_reward"])
     trained_recall_avg = sum(r["trained_recall"] for r in rows) / len(rows)
     base_recall_avg = sum(r["base_recall"] for r in rows) / len(rows)
+    row_n = len(rows)
+    win_pct = (win_count / row_n) if row_n else 0.0
     summary = (
-        f"### LEADERBOARD · {len(rows)} missions\n"
-        f"mode **{scenario_mode}** · level **{eff_difficulty}** · adversary **{eff_personality}**\n\n"
-        f"- Junior avg reward: **{base_avg:+.3f}**\n"
-        f"- Senior avg reward: **{trained_avg:+.3f}**\n"
-        f"- Senior win rate: **{(win_count / len(rows)):.0%}** ({win_count}/{len(rows)})\n"
-        f"- Ties: **{tie_count}**\n"
-        f"- Junior avg recall: **{base_recall_avg:.2f}**\n"
-        f"- Senior avg recall: **{trained_recall_avg:.2f}**"
+        "<section class='bench-report' role='status' aria-live='polite'>"
+        f"<h2 class='bench-report-title'>{row_n} missions · quick leaderboard</h2>"
+        "<p class='bench-report-row'>"
+        f"<span class='bench-pill'>{scenario_mode}</span>"
+        f"<span class='bench-pill'>{eff_difficulty}</span>"
+        f"<span class='bench-pill'>{eff_personality}</span>"
+        "</p>"
+        "<ul class='bench-report-list'>"
+        f"<li>Junior avg reward: <strong>{base_avg:+.3f}</strong></li>"
+        f"<li>Senior avg reward: <strong>{trained_avg:+.3f}</strong></li>"
+        f"<li>Senior win rate: <strong>{win_pct:.0%}</strong> ({win_count}/{row_n})</li>"
+        f"<li>Ties: <strong>{tie_count}</strong></li>"
+        f"<li>Junior avg recall: <strong>{base_recall_avg:.2f}</strong></li>"
+        f"<li>Senior avg recall: <strong>{trained_recall_avg:.2f}</strong></li>"
+        "</ul>"
+        "</section>"
     )
     return summary, _fmt_info({"benchmark": rows})
 
@@ -684,6 +695,9 @@ _SPACE_CSS = """
   --display: 'Major Mono Display', ui-monospace, monospace;
   --body:    'Chakra Petch', ui-sans-serif, system-ui, sans-serif;
   --code:    'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace;
+  --ease-snap: cubic-bezier(0.22, 1, 0.36, 1);
+  --dur-panel: 0.55s;
+  --dur-loop: 4.5s;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -709,16 +723,75 @@ _SPACE_CSS = """
   }
 }
 
+/* ── motion primitives (use transforms / opacity; respect reduced-motion below) */
+@keyframes floatGlow {
+  0%, 100% { background-position: 0% 0%, 0% 0%; }
+  50% { background-position: 10% 12%, 0% 0%; }
+}
+@keyframes blobPulse {
+  0%, 100% { transform: scale(1) translate(0, 0); opacity: 0.55; }
+  50% { transform: scale(1.08) translate(2%, -1%); opacity: 0.85; }
+}
+@keyframes panelRise {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes titleBeacon {
+  0%, 100% { text-shadow: 0 0 0 transparent; }
+  50% { text-shadow: 0 0 20px color-mix(in oklch, var(--color-primary) 32%, transparent); }
+}
+@keyframes xpGlint {
+  0% { transform: translateX(-120%); }
+  100% { transform: translateX(120%); }
+}
+@keyframes scanDrift {
+  from { background-position: 0 0; }
+  to { background-position: 0 8px; }
+}
+@keyframes borderPulse {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklch, var(--color-primary) 28%, transparent); }
+  50% { box-shadow: 0 0 0 2px color-mix(in oklch, var(--color-primary) 20%, transparent); }
+}
+@keyframes hudEdgePulse {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-primary) 12%, transparent); }
+  50% { box-shadow: 0 0 20px 1px color-mix(in oklch, var(--color-primary) 10%, transparent); }
+}
+@keyframes livePulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+@keyframes cardPop {
+  from { opacity: 0; transform: translateY(6px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
 /* Gradio shell + global typography */
 .gradio-container,
 .gradio-container * { font-family: var(--body); }
 .gradio-container {
+  position: relative;
+  z-index: 0;
   background:
     radial-gradient(1200px 700px at 70% -10%, color-mix(in oklch, var(--color-primary) 16%, transparent) 0%, transparent 70%),
     var(--color-background) !important;
+  background-size: 120% 120%, 100% 100% !important;
+  animation: floatGlow 32s ease-in-out infinite;
   color: var(--color-text-primary) !important;
   min-height: 100vh;
   line-height: 1.5;
+}
+.gradio-container::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(50vmax 50vmax at 85% 5%, color-mix(in oklch, var(--color-primary) 8%, transparent) 0%, transparent 65%);
+  animation: blobPulse 20s ease-in-out infinite;
+  opacity: 0.3;
+}
+.gradio-container > * {
+  position: relative;
+  z-index: 1;
 }
 .gradio-container :is(h1, h2, h3, h4, h5) {
   color: var(--color-text-primary) !important;
@@ -784,6 +857,12 @@ _SPACE_CSS = """
 }
 .gradio-container button.primary:hover, .gradio-container .primary > button:hover {
   background: var(--color-primary-strong) !important;
+  box-shadow: 0 4px 18px -4px color-mix(in oklch, var(--color-primary) 30%, transparent) !important;
+}
+@media (hover: hover) and (pointer: fine) {
+  .gradio-container button.primary:hover, .gradio-container .primary > button:hover {
+    transform: translateY(-1px) scale(1.01);
+  }
 }
 
 /* Tabs */
@@ -796,10 +875,15 @@ _SPACE_CSS = """
   border-bottom: 2px solid transparent !important;
   border-radius: 0 !important;
   color: var(--color-text-secondary) !important;
+  transition: color 0.22s var(--ease-snap), border-color 0.22s var(--ease-snap), transform 0.2s var(--ease-snap) !important;
 }
 .gradio-container .tab-nav button.selected {
   color: var(--color-primary) !important;
   border-bottom-color: var(--color-primary) !important;
+}
+.gradio-container .tab-nav button:hover:not(.selected) {
+  color: var(--color-text-primary) !important;
+  transform: translateY(-1px);
 }
 
 /* Generic surface used for every panel */
@@ -809,23 +893,53 @@ _SPACE_CSS = """
 
 /* ── HUD ───────────────────────────────────────────── */
 .hud {
+  position: relative;
+  z-index: 0;
   border: 1px solid var(--color-border);
   background: linear-gradient(180deg, var(--color-surface-2) 0%, var(--color-surface) 100%);
   border-radius: var(--radius-lg);
   padding: var(--space-4) var(--space-5);
-  position: relative;
   overflow: hidden;
+}
+.hud-ambient {
+  animation:
+    panelRise var(--dur-panel) var(--ease-snap) both,
+    hudEdgePulse 5.2s ease-in-out 0.55s infinite;
+}
+.hud-orbit {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background-image: repeating-linear-gradient(
+    0deg,
+    transparent 0 3px,
+    color-mix(in oklch, var(--color-text-primary) 4%, transparent) 3px,
+    transparent 4px
+  );
+  background-size: 100% 8px;
+  mix-blend-mode: overlay;
+  opacity: 0.2;
+  pointer-events: none;
+  animation: scanDrift 14s linear infinite;
 }
 .hud::before, .hud::after {
   content: '';
   position: absolute;
+  z-index: 2;
   width: 14px; height: 14px;
   border: 2px solid var(--color-primary);
-  opacity: 0.6;
+  opacity: 0.7;
+  transition: border-color 0.3s var(--ease-snap);
 }
 .hud::before { top: 6px; left: 6px; border-right: none; border-bottom: none; }
 .hud::after  { bottom: 6px; right: 6px; border-left: none; border-top: none; }
+.hud:hover::before, .hud:hover::after {
+  opacity: 1;
+  border-color: var(--color-primary-strong);
+}
 .hud-row {
+  position: relative;
+  z-index: 1;
   display: grid;
   grid-template-columns: auto 1.4fr auto auto auto;
   gap: var(--space-5);
@@ -848,7 +962,14 @@ _SPACE_CSS = """
   color: var(--color-text-primary);
 }
 .hud-value .hud-sub { font-size: var(--font-size-sm); color: var(--color-text-secondary); margin-left: 4px; }
-.hud-meta { margin-top: var(--space-3); display: flex; gap: var(--space-2); }
+.hud-meta {
+  position: relative;
+  z-index: 1;
+  margin-top: var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
 .hud-pill {
   font-family: var(--body);
   font-size: var(--font-size-xs);
@@ -876,13 +997,24 @@ _SPACE_CSS = """
   position: relative;
 }
 .xpbar-fill {
+  position: relative;
   height: 100%;
   background: repeating-linear-gradient(
     90deg,
     var(--color-primary) 0 8px,
     var(--color-primary-strong) 8px 16px
   );
-  transition: width 600ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: width 600ms var(--ease-snap);
+  overflow: hidden;
+}
+.xpbar-fill::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; left: 0;
+  width: 45%;
+  background: linear-gradient(90deg, transparent, color-mix(in oklch, var(--color-primary-on) 18%, transparent), transparent);
+  animation: xpGlint 2.1s var(--ease-snap) infinite;
+  pointer-events: none;
 }
 
 /* Production status */
@@ -926,7 +1058,14 @@ _SPACE_CSS = """
   background: var(--color-surface);
   font-size: var(--font-size-sm);
   color: var(--color-text-primary);
+  transition: box-shadow 0.35s var(--ease-snap), border-color 0.35s var(--ease-snap);
+  animation: panelRise var(--dur-panel) var(--ease-snap) both;
 }
+.mission-strip.mission-active {
+  border-color: color-mix(in oklch, var(--color-primary) 55%, var(--color-border)) !important;
+  animation: panelRise var(--dur-panel) var(--ease-snap) both, borderPulse 2.8s ease-in-out 0.4s infinite;
+}
+.mission-ready { border-color: var(--color-border) !important; }
 .mission-tag {
   font-family: var(--display);
   letter-spacing: 0.18em;
@@ -951,6 +1090,7 @@ _SPACE_CSS = """
   background: var(--color-surface);
   position: relative;
 }
+.banner-anim { animation: panelRise 0.48s var(--ease-snap) both; }
 .banner-ok      { border-color: color-mix(in oklch, var(--color-success) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-success) 35%, transparent) inset; }
 .banner-danger  { border-color: color-mix(in oklch, var(--color-danger) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-danger) 35%, transparent) inset; }
 .banner-warn    { border-color: color-mix(in oklch, var(--color-warning) 62%, var(--color-border)); box-shadow: 0 0 0 1px color-mix(in oklch, var(--color-warning) 35%, transparent) inset; }
@@ -1052,6 +1192,12 @@ _SPACE_CSS = """
   border: 1px solid var(--color-border);
   border-radius: var(--radius-sm); padding: var(--space-3);
   background: var(--color-background-elevated);
+  transition: transform 0.22s var(--ease-snap), box-shadow 0.22s var(--ease-snap), border-color 0.2s;
+}
+.loadout-card:hover {
+  transform: translateY(-3px);
+  border-color: color-mix(in oklch, var(--color-primary) 40%, var(--color-border));
+  box-shadow: 0 8px 28px -8px color-mix(in oklch, var(--color-primary) 12%, transparent);
 }
 .loadout-title { font-family: var(--display); font-size: var(--font-size-xs); letter-spacing: 0.14em; color: var(--color-text-secondary); }
 .loadout-name  { font-size: var(--font-size-sm); font-weight: 600; margin-top: 2px; color: var(--color-text-primary); }
@@ -1090,23 +1236,69 @@ _SPACE_CSS = """
   color: var(--color-text-secondary);
 }
 .help-card b, .help-card code { color: var(--color-text-primary); }
+.help-card--rise { animation: cardPop 0.55s var(--ease-snap) both; }
 .help-card + .help-card { margin-top: var(--space-2); }
 
-/* H1 / page title */
-.app-header {
-  margin-bottom: var(--space-4);
+/* H1 / page title + hero */
+.app-header { margin-bottom: var(--space-4); }
+.app-hero-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-4);
 }
+.app-hero-text { flex: 1 1 18rem; }
+.signal-cluster { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-1); }
+.signal-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: var(--display);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-background-elevated);
+  color: var(--color-text-secondary);
+  transition: border-color 0.2s, color 0.2s, transform 0.2s var(--ease-snap);
+  animation: panelRise 0.5s var(--ease-snap) both;
+  animation-delay: 0.12s;
+}
+.signal-pill + .signal-pill { animation-delay: 0.22s; }
+.signal-pill--live { color: var(--color-danger); border-color: color-mix(in oklch, var(--color-danger) 45%, var(--color-border)); }
+.signal-pill--live::before { content: ''; width: 7px; height: 7px; background: var(--color-danger); border-radius: 50%; animation: livePulse 1.2s ease-in-out infinite; }
 .page-title {
   font-family: var(--display);
   letter-spacing: 0.20em;
   font-size: var(--font-size-2xl);
   color: var(--color-text-primary);
   margin: 0;
+  animation: panelRise 0.65s var(--ease-snap) both, titleBeacon 4.2s ease-in-out 0.5s infinite;
 }
 .page-sub {
-  color: var(--color-text-secondary); font-size: var(--font-size-md); margin-top: 4px;
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-md);
+  margin-top: 4px;
   max-width: 70ch;
+  animation: panelRise 0.6s var(--ease-snap) 0.08s both;
 }
+
+/* Quick benchmark HTML panel */
+.bench-report {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  background: var(--color-surface);
+  animation: panelRise var(--dur-panel) var(--ease-snap) both;
+}
+.bench-report-title { font-family: var(--display); font-size: var(--font-size-md); margin: 0 0 var(--space-2); letter-spacing: 0.1em; text-transform: uppercase; color: var(--color-text-primary); }
+.bench-report-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: 0 0 var(--space-3); }
+.bench-pill { font-size: var(--font-size-xs); letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--color-border); background: var(--color-background-elevated); color: var(--color-text-primary); }
+.bench-report-list { margin: 0; padding-left: 1.2rem; color: var(--color-text-primary); line-height: 1.65; font-size: var(--font-size-sm); }
+.bench-report-list strong { color: var(--color-primary); font-weight: 700; }
 
 /* DataFrames */
 .gradio-container .table-wrap, .gradio-container .gr-dataframe {
@@ -1119,6 +1311,58 @@ _SPACE_CSS = """
 .chart-container .plotly .ytick text,
 .chart-container .plotly .legendtext {
   fill: var(--color-text-secondary) !important;
+}
+
+.gradio-container [class*="markdown"] p,
+.gradio-container [class*="markdown"] li,
+.gradio-container [class*="markdown"] th,
+.gradio-container [class*="markdown"] td {
+  color: var(--color-text-primary) !important;
+}
+.gradio-container [class*="markdown"] a {
+  color: var(--color-primary) !important;
+}
+.replay-markdown, .replay-markdown p, .replay-markdown em, .replay-markdown strong {
+  color: var(--color-text-primary) !important;
+}
+.gradio-container .replay-markdown { animation: panelRise 0.45s var(--ease-snap) both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gradio-container,
+  .gradio-container::after,
+  .page-title,
+  .page-sub,
+  .signal-pill,
+  .hud,
+  .hud-ambient,
+  .hud-orbit,
+  .xpbar-fill::after,
+  .mission-strip,
+  .mission-strip.mission-active,
+  .banner-anim,
+  .bench-report,
+  .help-card--rise,
+  .hud-card,
+  .cascade-row,
+  .signal-pill--live::before,
+  .prod-ok .prod-dot,
+  .prod-warn .prod-dot,
+  .prod-danger .prod-dot {
+    animation: none !important;
+  }
+  .gradio-container { background-size: 100% 100%, 100% 100% !important; }
+  .gradio-container::after { opacity: 0.1; }
+  .gradio-container .replay-markdown { animation: none !important; }
+  .loadout-card,
+  .gradio-container button,
+  .gradio-container .tab-nav button {
+    transition: none !important;
+  }
+  .loadout-card:hover,
+  .gradio-container button:hover,
+  .gradio-container .tab-nav button:hover:not(.selected) {
+    transform: none !important;
+  }
 }
 
 @media (max-width: 980px) {
@@ -1150,10 +1394,18 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
     # ── Top HUD ────────────────────────────────────────────────────────────
     gr.HTML(
         "<header class='app-header'>"
+        "<div class='app-hero-row'>"
+        "<div class='app-hero-text'>"
         "<h1 class='page-title'>BUG · BOUNTY · ARENA</h1>"
         "<p class='page-sub'>An adversary mutates the codebase. A PR ships referencing the <em>old world</em>. "
         "Tests crash. Your reviewer agent has one shot to <b>find the bug, name it, and trace the failure path</b> "
         "— or production goes down for real.</p>"
+        "</div>"
+        "<div class='signal-cluster' aria-label='Session tags'>"
+        "<span class='signal-pill signal-pill--live'>LIVE ARENA</span>"
+        "<span class='signal-pill'>OPENENV · GRPO</span>"
+        "</div>"
+        "</div>"
         "</header>"
     )
 
@@ -1173,7 +1425,7 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
         # ── Mission Console ────────────────────────────────────────────────
         with gr.Tab("◤ MISSION CONSOLE"):
             gr.HTML(
-                "<div class='help-card'>"
+                "<div class='help-card help-card--rise'>"
                 "<b>1.</b> Tune the mission rules · <b>2.</b> Deploy a mission · <b>3.</b> Load a loadout "
                 "(<b>Junior Dev</b> for the failure baseline, <b>Senior Reviewer</b> for the trained policy) · "
                 "<b>4.</b> Submit the report. Each scored mission updates your <b>XP</b>, <b>streak</b>, "
@@ -1204,7 +1456,7 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
 
                 with gr.Column(scale=2):
                     status = gr.HTML(
-                        "<section class='mission-strip' role='status' aria-live='polite'>"
+                        "<section class='mission-strip mission-ready' role='status' aria-live='polite'>"
                         "<span class='mission-tag'>READY</span>"
                         "<span class='mission-meta'>Press <b>Deploy Mission</b> to spawn a bug.</span>"
                         "</section>"
@@ -1268,12 +1520,15 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
 
                     cascade_panel = gr.HTML(_cascade_html(None))
                     scorer_out = gr.Textbox(label="XP breakdown (JSON)", lines=10, max_lines=18, interactive=False)
-                    replay_out = gr.Markdown("_No mission log yet. Submit a mission report to populate this panel._")
+                    replay_out = gr.Markdown(
+                        "_No mission log yet. Submit a mission report to populate this panel._",
+                        elem_classes="replay-markdown",
+                    )
 
         # ── Leaderboard tab ────────────────────────────────────────────────
         with gr.Tab("◣ LEADERBOARD"):
             gr.HTML(
-                "<div class='help-card'>"
+                "<div class='help-card help-card--rise'>"
                 "Send the <b>Junior</b> and the <b>Senior</b> on the same N missions. "
                 "Compare XP, win rate, and which bug families the Senior dominates."
                 "</div>"
@@ -1289,7 +1544,11 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
                     value="random", label="Adversary style",
                 )
             btn_compare = gr.Button("▶ RUN LEADERBOARD", variant="primary")
-            cmp_summary = gr.HTML("<div class='help-card'>Press <b>Run Leaderboard</b> to populate the scoreboard.</div>")
+            cmp_summary = gr.HTML(
+                "<section class='help-card help-card--rise' role='status'>"
+                "Press <b>Run Leaderboard</b> to populate the scoreboard."
+                "</section>"
+            )
             with gr.Row():
                 cmp_chart = gr.BarPlot(
                     label="XP per mission · Junior vs Senior",
@@ -1378,7 +1637,7 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
         # ── Real-PR tab ────────────────────────────────────────────────────
         with gr.Tab("◢ REAL-PR HUNTER"):
             gr.HTML(
-                "<div class='help-card'>"
+                "<div class='help-card help-card--rise'>"
                 "<b>Two ways to load a PR:</b><br>"
                 "&nbsp;• <b>Paste a unified diff</b> directly, or<br>"
                 "&nbsp;• <b>Paste a GitHub URL</b> (PR / commit / compare / raw <code>.diff</code>) "
@@ -1444,15 +1703,18 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
             def _on_score_real(diff_text: str, refs_text: str, review_text: str, drift_kind: str) -> tuple[str, str]:
                 refs = [ln.strip() for ln in (refs_text or "").splitlines() if ln.strip()]
                 if not (diff_text or "").strip():
-                    return ("<div class='mission-strip mission-warn'>EMPTY DIFF</div>", _fmt_info({"error": "empty_diff"}))
+                    return (
+                        "<section class='mission-strip mission-warn' role='status'>EMPTY DIFF</section>",
+                        _fmt_info({"error": "empty_diff"}),
+                    )
                 if not refs:
                     return (
-                        "<div class='mission-strip mission-warn'>NEED ≥1 STALE REF</div>",
+                        "<section class='mission-strip mission-warn' role='status'>NEED ≥1 STALE REF</section>",
                         _fmt_info({"error": "no_stale_refs"}),
                     )
                 if not (review_text or "").strip():
                     return (
-                        "<div class='mission-strip mission-warn'>EMPTY REVIEW</div>",
+                        "<section class='mission-strip mission-warn' role='status'>EMPTY REVIEW</section>",
                         _fmt_info({"error": "empty_review"}),
                     )
                 try:
@@ -1460,7 +1722,7 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
                     return _status_banner(reward, info), _fmt_info({"reward": reward, "diff_summary": summary, "scorer_info": info})
                 except Exception as exc:
                     return (
-                        f"<div class='mission-strip mission-error'>SCORING FAILED · {exc!s}</div>",
+                        f"<section class='mission-strip mission-error' role='status'>SCORING FAILED · {exc!s}</section>",
                         _fmt_info({"error": str(exc), "type": type(exc).__name__}),
                     )
 
@@ -1501,7 +1763,7 @@ with gr.Blocks(**_BLOCKS_KWARGS) as demo:
         # ── Help / Why this works tab ──────────────────────────────────────
         with gr.Tab("◆ WHY THIS WORKS"):
             gr.HTML(
-                "<div class='help-card'>"
+                "<div class='help-card help-card--rise'>"
                 "<b>The setup</b> — A generator agent mutates the codebase (rename, removal, contract change, "
                 "or a multi-frame cascade). A PR is shipped that still references the <i>old world</i>. The test "
                 "suite crashes — that's the execution oracle. The reviewer's job is to <b>name the stale ref</b>, "
