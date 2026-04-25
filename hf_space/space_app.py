@@ -328,6 +328,21 @@ def submit_review(env: CodeDriftEnv | None, review: str, replay_events: list[dic
         )
 
 
+def _metric_card(title: str, base: float, trained: float, fmt: str = "{:+.3f}") -> str:
+    delta = trained - base
+    color = "#22c55e" if delta > 1e-6 else "#ef4444" if delta < -1e-6 else "#6b7280"
+    arrow = "▲" if delta > 0 else "▼" if delta < 0 else "▬"
+    return (
+        "<div class='cd-card cd-kpi' style='display:inline-block; min-width:170px; margin:4px;'>"
+        f"<div style='font-size:11px; opacity:0.65; text-transform:uppercase'>{title}</div>"
+        f"<div style='font-size:18px; margin-top:2px;'>"
+        f"<b>Base</b> {fmt.format(base)} &nbsp; <b>Trained</b> {fmt.format(trained)}"
+        f"</div>"
+        f"<div style='color:{color}; font-size:13px; margin-top:2px;'>{arrow} delta {fmt.format(delta)}</div>"
+        "</div>"
+    )
+
+
 def run_benchmark(
     n_episodes: int,
     difficulty: str,
@@ -494,6 +509,117 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
             btn_submit = gr.Button("⚖️ Score review", variant="primary")
             scorer_out = gr.Textbox(label="Causal Reward Breakdown (JSON)", lines=12, max_lines=20, interactive=False)
             replay_out = gr.Markdown("No replay events yet. Score some reviews to populate this panel.")
+
+    with gr.Accordion("📊 Comparison Dashboard (Base vs Trained, with charts)", open=False):
+        gr.Markdown(
+            "<div class='cd-card cd-kpi'>"
+            "Run <b>N deterministic episodes</b> with both the naive Base policy and the episode-aware "
+            "Trained policy. You get headline metric cards, a per-episode bar chart, and a per-drift-type "
+            "breakdown so judges can scan the gap at a glance."
+            "</div>"
+        )
+        with gr.Row():
+            cmp_n = gr.Slider(minimum=3, maximum=30, value=12, step=1, label="Episodes to compare")
+            cmp_seed = gr.Textbox(value="42", label="Seed (start)", max_lines=1)
+            cmp_difficulty = gr.Dropdown(
+                choices=["easy", "medium", "hard"], value="easy", label="Difficulty"
+            )
+            cmp_personality = gr.Dropdown(
+                choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
+                value="random",
+                label="Drift personality",
+            )
+        btn_compare = gr.Button("📈 Run Comparison", variant="primary")
+        cmp_summary = gr.HTML("Click <b>Run Comparison</b> to populate this dashboard.")
+        with gr.Row():
+            cmp_chart = gr.BarPlot(
+                label="Per-episode reward (Base vs Trained)",
+                x="episode",
+                y="reward",
+                color="policy",
+                tooltip=["episode", "policy", "reward", "drift_type"],
+                height=320,
+            )
+            cmp_pattern_chart = gr.BarPlot(
+                label="Avg reward by drift type",
+                x="drift_type",
+                y="reward",
+                color="policy",
+                tooltip=["drift_type", "policy", "reward"],
+                height=320,
+            )
+        cmp_table = gr.Dataframe(
+            headers=["episode", "drift_type", "stale_ref", "base_reward", "trained_reward", "delta"],
+            label="Per-episode detail",
+            wrap=True,
+            interactive=False,
+        )
+
+        def _on_compare(n, seed_str, diff_lvl, persona):
+            try:
+                base_seed = int(seed_str)
+            except (TypeError, ValueError):
+                base_seed = 42
+            n = max(3, min(30, int(n)))
+            chart_rows: list[dict[str, Any]] = []
+            pattern_acc: dict[tuple[str, str], list[float]] = {}
+            table_rows: list[list[Any]] = []
+            base_total = trained_total = 0.0
+            wins = ties = 0
+            base_recall_total = trained_recall_total = 0.0
+            for i in range(n):
+                s = base_seed + i
+                env_b = CodeDriftEnv(difficulty=diff_lvl, personality=persona, seed=s)
+                env_b.reset()
+                _, rb, _, info_b = env_b.step(BASE_MODEL_RESPONSE)
+                env_t = CodeDriftEnv(difficulty=diff_lvl, personality=persona, seed=s)
+                env_t.reset()
+                _, rt, _, info_t = env_t.step(_trained_response_for(env_t))
+                drift_types = [a.drift_type for a in env_t.stale_actions] or ["unknown"]
+                drift_type = drift_types[0]
+                stale = env_t.stale_actions[0].stale_ref if env_t.stale_actions else ""
+                base_total += rb
+                trained_total += rt
+                base_recall_total += float(info_b.get("recall", 0.0) or 0.0)
+                trained_recall_total += float(info_t.get("recall", 0.0) or 0.0)
+                if rt > rb + 1e-9:
+                    wins += 1
+                elif abs(rt - rb) < 1e-9:
+                    ties += 1
+                chart_rows.append(
+                    {"episode": i + 1, "policy": "Base", "reward": float(rb), "drift_type": drift_type}
+                )
+                chart_rows.append(
+                    {"episode": i + 1, "policy": "Trained", "reward": float(rt), "drift_type": drift_type}
+                )
+                pattern_acc.setdefault((drift_type, "Base"), []).append(rb)
+                pattern_acc.setdefault((drift_type, "Trained"), []).append(rt)
+                table_rows.append([i + 1, drift_type, stale, round(rb, 3), round(rt, 3), round(rt - rb, 3)])
+
+            base_avg = base_total / n
+            trained_avg = trained_total / n
+            base_recall_avg = base_recall_total / n
+            trained_recall_avg = trained_recall_total / n
+            cards = (
+                _metric_card("Avg reward", base_avg, trained_avg)
+                + _metric_card("Avg recall", base_recall_avg, trained_recall_avg, fmt="{:.2f}")
+                + _metric_card("Win rate (T>B)", 0.0, wins / n, fmt="{:.0%}")
+                + _metric_card("Ties", 0.0, ties, fmt="{:.0f}")
+            )
+            header = (
+                f"<div style='margin-bottom:6px'><b>{n} episodes</b> · difficulty={diff_lvl} · personality={persona}</div>"
+            )
+            pattern_rows = [
+                {"drift_type": dt, "policy": pol, "reward": round(sum(vs) / len(vs), 3)}
+                for (dt, pol), vs in pattern_acc.items()
+            ]
+            return header + cards, chart_rows, pattern_rows, table_rows
+
+        btn_compare.click(
+            _on_compare,
+            inputs=[cmp_n, cmp_seed, cmp_difficulty, cmp_personality],
+            outputs=[cmp_summary, cmp_chart, cmp_pattern_chart, cmp_table],
+        )
 
     with gr.Accordion("🌍 Score a Real PR (multi-language, auto-detect, URL fetch)", open=False):
         gr.Markdown(
