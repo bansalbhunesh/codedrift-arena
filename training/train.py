@@ -10,8 +10,14 @@ import argparse
 import hashlib
 import json
 import logging
+import os
 import sys
 from pathlib import Path
+
+# Windows: default text encoding is often cp1252; TRL reads UTF-8 .jinja templates
+# with pathlib and crashes with UnicodeDecodeError. Re-exec once with UTF-8 mode.
+if __name__ == "__main__" and sys.platform == "win32" and not getattr(sys.flags, "utf8_mode", False):
+    os.execv(sys.executable, [sys.executable, "-X", "utf8", *sys.argv])
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
