@@ -72,25 +72,54 @@ def _adversary_brain_html(env: CodeDriftEnv | None) -> str:
 
 
 def _status_lines(reward: float, info: dict[str, Any]) -> str:
-    """SUCCESS/FAILURE headline in Markdown + emoji strip + summary + impact + confidence."""
+    """Gamified SUCCESS/FAILURE banner: XP, mission status, plain-English impact."""
     kw = info.get("judge_keyword_line") or "⚪ NO REVIEW"
-    emoji = (info.get("judge_emoji") or "").strip() or "⚪"
-    strip = info.get("metric_strip") or f"reward={reward:+.2f}"
     summary = info.get("judge_summary") or ""
     why = info.get("judge_why_matters") or ""
     conf = info.get("confidence_strip") or ""
     ep = info.get("episode_id") or ""
-    
-    # Visual cues
-    color = "#22c55e" if "SUCCESS" in kw else "#ef4444" if "FAILURE" in kw else "#eab308" if "PARTIAL" in kw else "#6b7280"
-    
-    md = f"<div style='border-left: 8px solid {color}; padding-left: 15px; margin-bottom: 20px;'>"
-    md += f"<h1 style='color:{color}; margin-top: 0;'>{kw}</h1>"
-    md += f"### {emoji} {strip}\n\n"
-    if summary: md += f"**{summary}**\n\n"
-    if why: md += f"💡 *Why it matters:* {why}\n\n"
-    if conf: md += f"**{conf}**\n\n"
-    md += f"<small style='opacity: 0.6'>Episode ID: {ep}</small>"
+    n_stale = int(info.get("n_stale_refs", 0) or 0)
+    caught_count = len(info.get("caught", []) or [])
+    missed_count = len(info.get("missed", []) or [])
+
+    is_success = "SUCCESS" in kw or "PERFECT" in kw
+    is_failure = "FAILURE" in kw or "MISSED" in kw
+    is_partial = "PARTIAL" in kw
+
+    if is_success:
+        color = "#22c55e"
+        headline = f"🏆 BUG BOUNTY DEFUSED  ·  +{int(round(reward * 100))} XP"
+        prod = "🟢 Production: STABLE — bug caught before merge"
+    elif is_failure:
+        color = "#ef4444"
+        headline = f"💥 PRODUCTION DOWN  ·  {int(round(reward * 100))} XP"
+        prod = "🔴 Production: CRASHED — bug shipped to users"
+    elif is_partial:
+        color = "#eab308"
+        headline = f"⚠️ PARTIAL CATCH  ·  +{int(round(reward * 100))} XP"
+        prod = "🟡 Production: DEGRADED — some bugs slipped through"
+    else:
+        color = "#6b7280"
+        headline = f"⚪ NO MISSION SUBMITTED  ·  {int(round(reward * 100))} XP"
+        prod = "⚪ Production: AWAITING REVIEW"
+
+    md = f"<div class='cd-card' style='border-left: 8px solid {color}; padding-left: 16px; margin-bottom: 14px;'>"
+    md += f"<h2 style='color:{color}; margin: 4px 0 8px 0;'>{headline}</h2>"
+    md += f"<div class='cd-kpi' style='margin-bottom:6px'><b>{prod}</b></div>"
+    md += (
+        f"<div class='cd-kpi' style='font-family:ui-monospace, Menlo, Consolas, monospace'>"
+        f"🎯 bugs in mission: <b>{n_stale}</b> · "
+        f"caught: <b style='color:#22c55e'>{caught_count}</b> · "
+        f"missed: <b style='color:#ef4444'>{missed_count}</b>"
+        f"</div>"
+    )
+    if summary:
+        md += f"<div style='margin-top:6px'>📝 <b>{summary}</b></div>"
+    if why:
+        md += f"<div style='margin-top:4px; opacity:.85'>💡 <i>Why it matters:</i> {why}</div>"
+    if conf:
+        md += f"<div style='margin-top:4px; opacity:.8'>{conf}</div>"
+    md += f"<div style='margin-top:6px; opacity:.55; font-size:11px'>Mission ID: {ep}</div>"
     md += "</div>"
     return md
 
@@ -482,23 +511,24 @@ _SPACE_CSS = """
 
 with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
     gr.Markdown(
-        "# 🏟️ CodeDrift Arena\n"
-        "**Challenge:** The codebase silently drifted — renames, deletions, API contract changes — and "
-        "the PR still references the old world. Tests are failing. The reviewer must trace the failure to its "
-        "exact root cause.\n\n"
-        "**Demo flow (under 1 minute):**\n"
-        "1. Click **🔄 New episode** — generates a drifted repo + PR + failing test output.\n"
-        "2. Click **▶ Base Model (Fails)** → **⚖️ Score review** — naive APPROVE; reward goes negative.\n"
-        "3. Click **🔄 New episode** again, then **▶ Trained Model (Wins)** → **⚖️ Score review** — "
-        "the trained policy reads this episode's diff and cites the real stale ref; reward jumps positive.\n"
-        "4. Click **🚀 Run Benchmark** for an N-episode aggregate (Base vs Trained, Win rate)."
+        "# 🐛 Bug Bounty Arena\n"
+        "### Catch the bug before production goes down.\n"
+        "An adversary mutates the codebase. A PR ships referencing the **old world**. Tests crash. "
+        "Your reviewer agent has one shot to **find the bug, name it, and trace the failure path** — "
+        "or production goes down for real.\n\n"
+        "**Mission flow (under 60 seconds):**\n"
+        "1. **🚨 Start Mission** — a new bug drops into the codebase.\n"
+        "2. **🤖 Junior Dev** → **🎯 Submit** — naive reviewer ships the bug. Production crashes 💥.\n"
+        "3. **🚨 Start Mission** again, then **🧠 Senior Reviewer** → **🎯 Submit** — trained agent traces the failure. Production stays up 🟢.\n"
+        "4. **🏁 Run Leaderboard** — Junior vs Senior across N missions, with XP, win rate, and per-bug breakdown."
     )
     gr.Markdown(
         "<div class='cd-card cd-kpi'>"
-        "<b>How scoring works:</b> the scorer reads <code>VERDICT</code> + <code>ISSUES</code> from your review, "
-        "matches them against ground-truth stale refs, and rewards correct catch + diff grounding while penalizing "
-        "missed drifts and spurious mentions. The <i>Trained Model</i> button is now <b>episode-aware</b>: it builds "
-        "the response from the current episode's actual stale refs so the win is real, not a fixed string."
+        "<b>How XP is earned:</b> the scorer reads <code>VERDICT</code> + <code>ISSUES</code> from the "
+        "reviewer's response, matches them against the bug's ground-truth stale refs, and rewards correct "
+        "catch + diff grounding while penalizing missed bugs and false positives. The <i>Senior Reviewer</i> "
+        "button is <b>mission-aware</b>: it builds the response from this mission's actual stale refs so the "
+        "win is real, not a fixed string. XP = reward × 100."
         "</div>"
     )
 
@@ -511,25 +541,25 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
                 difficulty = gr.Dropdown(
                     choices=["easy", "medium", "hard"],
                     value="easy",
-                    label="Difficulty",
+                    label="🎚️ Mission level",
                 )
                 personality = gr.Dropdown(
                     choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
                     value="random",
-                    label="Drift personality",
+                    label="😈 Adversary style",
                 )
             scenario_mode = gr.Dropdown(
                 choices=["Random", "Edge Cases", "Hard Mode"],
                 value="Random",
-                label="Test mode",
+                label="🎮 Mission mode",
             )
-            seed = gr.Textbox(value="42", label="Seed", max_lines=1)
-            btn_new = gr.Button("🔄 New episode", variant="primary")
-            benchmark_n = gr.Slider(minimum=3, maximum=30, value=10, step=1, label="Benchmark episodes")
-            btn_benchmark = gr.Button("🚀 Run Benchmark", variant="secondary")
+            seed = gr.Textbox(value="42", label="🎲 Seed", max_lines=1)
+            btn_new = gr.Button("🚨 Start Mission", variant="primary")
+            benchmark_n = gr.Slider(minimum=3, maximum=30, value=10, step=1, label="🏁 Leaderboard size")
+            btn_benchmark = gr.Button("🏁 Run Leaderboard", variant="secondary")
 
         with gr.Column(scale=2):
-            status = gr.Markdown("### Click **New episode** to start.")
+            status = gr.Markdown("### Click **🚨 Start Mission** to deploy a new bug.")
 
     with gr.Row():
         with gr.Column():
@@ -551,9 +581,9 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
             prompt = gr.Textbox(label="🧾 Full Model Prompt (what the LLM actually sees)", lines=4, max_lines=8)
 
         with gr.Column():
-            brain_panel = gr.HTML(label="Adversary Brain")
+            brain_panel = gr.HTML(label="🧠 Adversary Brain")
             review = gr.Textbox(
-                label="Reviewer Response",
+                label="📝 Reviewer answer (mission report)",
                 lines=10,
                 placeholder=(
                     "VERDICT: REQUEST_CHANGES\n"
@@ -565,38 +595,37 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
                 ),
             )
             with gr.Row():
-                btn_base = gr.Button("▶ Base Model (Fails)", variant="secondary")
-                btn_trained = gr.Button("▶ Trained Model (Wins)", variant="secondary")
+                btn_base = gr.Button("🤖 Junior Dev (untrained)", variant="secondary")
+                btn_trained = gr.Button("🧠 Senior Reviewer (trained)", variant="secondary")
 
-            btn_submit = gr.Button("⚖️ Score review", variant="primary")
-            cascade_panel = gr.HTML("<div class='cd-card cd-kpi' style='opacity:.75'>Start an episode to see the failure cascade.</div>")
-            scorer_out = gr.Textbox(label="Causal Reward Breakdown (JSON)", lines=12, max_lines=20, interactive=False)
-            replay_out = gr.Markdown("No replay events yet. Score some reviews to populate this panel.")
+            btn_submit = gr.Button("🎯 Submit Mission Report", variant="primary")
+            cascade_panel = gr.HTML("<div class='cd-card cd-kpi' style='opacity:.75'>Start a mission to see the failure cascade.</div>")
+            scorer_out = gr.Textbox(label="🧮 XP breakdown (JSON)", lines=12, max_lines=20, interactive=False)
+            replay_out = gr.Markdown("No mission log yet. Submit a mission report to populate this panel.")
 
-    with gr.Accordion("📊 Comparison Dashboard (Base vs Trained, with charts)", open=False):
+    with gr.Accordion("🏁 Junior vs Senior Leaderboard (with charts)", open=False):
         gr.Markdown(
             "<div class='cd-card cd-kpi'>"
-            "Run <b>N deterministic episodes</b> with both the naive Base policy and the episode-aware "
-            "Trained policy. You get headline metric cards, a per-episode bar chart, and a per-drift-type "
-            "breakdown so judges can scan the gap at a glance."
+            "Send the <b>Junior Dev</b> and the <b>Senior Reviewer</b> on the same N missions. "
+            "See the XP gap, win rate, and which bug families the Senior dominates."
             "</div>"
         )
         with gr.Row():
-            cmp_n = gr.Slider(minimum=3, maximum=30, value=12, step=1, label="Episodes to compare")
-            cmp_seed = gr.Textbox(value="42", label="Seed (start)", max_lines=1)
+            cmp_n = gr.Slider(minimum=3, maximum=30, value=12, step=1, label="🏁 Missions in this leaderboard")
+            cmp_seed = gr.Textbox(value="42", label="🎲 Seed (start)", max_lines=1)
             cmp_difficulty = gr.Dropdown(
-                choices=["easy", "medium", "hard"], value="easy", label="Difficulty"
+                choices=["easy", "medium", "hard"], value="easy", label="🎚️ Mission level"
             )
             cmp_personality = gr.Dropdown(
                 choices=["random", "subtle", "aggressive", "escalating", "adaptive"],
                 value="random",
-                label="Drift personality",
+                label="😈 Adversary style",
             )
-        btn_compare = gr.Button("📈 Run Comparison", variant="primary")
-        cmp_summary = gr.HTML("Click <b>Run Comparison</b> to populate this dashboard.")
+        btn_compare = gr.Button("🏁 Run Leaderboard", variant="primary")
+        cmp_summary = gr.HTML("Click <b>🏁 Run Leaderboard</b> to populate the scoreboard.")
         with gr.Row():
             cmp_chart = gr.BarPlot(
-                label="Per-episode reward (Base vs Trained)",
+                label="🏆 XP per mission — Junior vs Senior",
                 x="episode",
                 y="reward",
                 color="policy",
@@ -604,7 +633,7 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
                 height=320,
             )
             cmp_pattern_chart = gr.BarPlot(
-                label="Avg reward by drift type",
+                label="🐛 Avg XP by bug family",
                 x="drift_type",
                 y="reward",
                 color="policy",
@@ -612,8 +641,8 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
                 height=320,
             )
         cmp_table = gr.Dataframe(
-            headers=["episode", "drift_type", "stale_ref", "base_reward", "trained_reward", "delta"],
-            label="Per-episode detail",
+            headers=["mission", "bug_family", "stale_ref", "junior_xp", "senior_xp", "delta_xp"],
+            label="📋 Mission-by-mission detail",
             wrap=True,
             interactive=False,
         )
@@ -650,13 +679,13 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
                 elif abs(rt - rb) < 1e-9:
                     ties += 1
                 chart_rows.append(
-                    {"episode": i + 1, "policy": "Base", "reward": float(rb), "drift_type": drift_type}
+                    {"episode": i + 1, "policy": "Junior", "reward": float(rb), "drift_type": drift_type}
                 )
                 chart_rows.append(
-                    {"episode": i + 1, "policy": "Trained", "reward": float(rt), "drift_type": drift_type}
+                    {"episode": i + 1, "policy": "Senior", "reward": float(rt), "drift_type": drift_type}
                 )
-                pattern_acc.setdefault((drift_type, "Base"), []).append(rb)
-                pattern_acc.setdefault((drift_type, "Trained"), []).append(rt)
+                pattern_acc.setdefault((drift_type, "Junior"), []).append(rb)
+                pattern_acc.setdefault((drift_type, "Senior"), []).append(rt)
                 table_rows.append([i + 1, drift_type, stale, round(rb, 3), round(rt, 3), round(rt - rb, 3)])
 
             base_avg = base_total / n
@@ -664,13 +693,13 @@ with gr.Blocks(title="CodeDrift Arena", css=_SPACE_CSS) as demo:
             base_recall_avg = base_recall_total / n
             trained_recall_avg = trained_recall_total / n
             cards = (
-                _metric_card("Avg reward", base_avg, trained_avg)
+                _metric_card("Avg XP", base_avg * 100, trained_avg * 100, fmt="{:+.0f}")
                 + _metric_card("Avg recall", base_recall_avg, trained_recall_avg, fmt="{:.2f}")
-                + _metric_card("Win rate (T>B)", 0.0, wins / n, fmt="{:.0%}")
+                + _metric_card("Win rate (Senior>Junior)", 0.0, wins / n, fmt="{:.0%}")
                 + _metric_card("Ties", 0.0, ties, fmt="{:.0f}")
             )
             header = (
-                f"<div style='margin-bottom:6px'><b>{n} episodes</b> · difficulty={diff_lvl} · personality={persona}</div>"
+                f"<div style='margin-bottom:6px'><b>{n} missions</b> · level={diff_lvl} · adversary={persona}</div>"
             )
             pattern_rows = [
                 {"drift_type": dt, "policy": pol, "reward": round(sum(vs) / len(vs), 3)}
