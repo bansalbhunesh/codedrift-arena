@@ -321,6 +321,13 @@ def train(args):
     import inspect
 
     model, tokenizer = load_model_and_tokenizer(args.model, backend=args.backend, seed=args.seed)
+    trainable_params = sum(p.numel() for p in model.parameters() if getattr(p, "requires_grad", False))
+    if trainable_params <= 0:
+        raise RuntimeError(
+            "No trainable parameters detected (0). LoRA adapters were not attached or are frozen. "
+            "Stopping early to avoid a wasted run. Try --backend hf and verify model.print_trainable_parameters()."
+        )
+    print(f"trainable params check: {trainable_params}")
 
     print("Building dataset...")
     rows = build_dataset_rows(
