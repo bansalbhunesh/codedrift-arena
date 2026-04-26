@@ -17,7 +17,7 @@ A **generator** mutates a mini-repo (renames, removals, contract changes, and mo
 | | |
 |--|--|
 | **Live demo** | [![Hugging Face Space](https://img.shields.io/badge/🤗%20HuggingFace-Space-blue)](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) |
-| **YouTube walkthrough (<2 min)** | [![YouTube](https://img.shields.io/badge/YouTube-Demo-red?logo=youtube)](https://youtu.be/u64BUrGOQRs) |
+| **YouTube walkthrough** | [![YouTube](https://img.shields.io/badge/YouTube-Demo-red?logo=youtube)](https://youtu.be/u64BUrGOQRs) |
 | **Blog / deep dive** | [BLOG.md](BLOG.md) · also visible as the **📝 BLOG** tab in the Space |
 | **Colab training notebook** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/bansalbhunesh/codedrift-arena/blob/main/colab/CodeDrift_GRPO.ipynb) |
 | **W&B training run** | [wandb.ai — sc4g3csw](https://wandb.ai/bhuneshbansal2003-thapar-university/huggingface/runs/sc4g3csw) |
