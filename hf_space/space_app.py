@@ -1476,7 +1476,23 @@ with gr.Blocks(title="Bug Code Arena") as demo:
                 )
         
             # ── Blog tab ───────────────────────────────────────────────────────
-            with gr.Tab("Blog"):
+            with gr.Tab("📝 BLOG"):
+                gr.HTML(
+                    "<div style='display:flex;align-items:center;gap:16px;"
+                    "background:#0f0f0f;border:1px solid #ff0000;border-radius:8px;"
+                    "padding:18px 24px;margin-bottom:20px;'>"
+                    "<div style='flex:1;'>"
+                    "<p style='margin:0 0 4px 0;color:#aaa;font-size:12px;letter-spacing:1px;text-transform:uppercase;'>Watch the full walkthrough</p>"
+                    "<p style='margin:0;color:#fff;font-size:18px;font-weight:700;'>CodeDrift Arena — Demo &amp; Deep Dive</p>"
+                    "</div>"
+                    "<a href='https://youtu.be/u64BUrGOQRs' target='_blank' rel='noopener' "
+                    "style='display:inline-flex;align-items:center;gap:8px;background:#ff0000;"
+                    "color:#fff;font-weight:700;font-size:15px;padding:12px 22px;"
+                    "border-radius:6px;text-decoration:none;white-space:nowrap;'>"
+                    "&#9654; Watch on YouTube"
+                    "</a>"
+                    "</div>"
+                )
                 gr.Markdown(_load_blog_md())
 
             # ── Help / Why this works tab ──────────────────────────────────────
