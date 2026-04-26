@@ -17,6 +17,8 @@ A **generator** mutates a mini-repo (renames, removals, contract changes, and mo
 | | |
 |--|--|
 | **Live demo** | [![Hugging Face Space](https://img.shields.io/badge/🤗%20HuggingFace-Space-blue)](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) |
+| **YouTube walkthrough** | [![YouTube](https://img.shields.io/badge/YouTube-Demo-red?logo=youtube)](https://youtu.be/u64BUrGOQRs) |
+| **Blog / deep dive** | [BLOG.md](BLOG.md) — full story, training diagnostics, and reward graphs |
 | **Interactive slides** | [Open in browser](https://cdn.jsdelivr.net/gh/bansalbhunesh/codedrift-arena@main/docs/readme-slides.html) — Reveal.js deck (← →, **Esc** overview). Source: [`docs/readme-slides.html`](docs/readme-slides.html) |
 | **Source** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
 | **Stack** | Python · Gradio (CPU Space) · FastAPI + `openenv-core` (HTTP) · TRL **GRPO** + QLoRA (GPU train) · **pytest** as execution oracle (V2) |
