@@ -233,7 +233,12 @@ After these fixes, the diagnostic confirmed: `reward std = 0.1615`, `4/4 complet
 
 ## Training Logs
 
-Full training logs are in `assets/logs/`. Key metrics to look for:
+**Download / view the raw logs:**
+
+- [logs 1.0.txt](https://github.com/bansalbhunesh/codedrift-arena/blob/main/assets/logs/logs%201.0.txt) — V1 training run output
+- [logs 2.0.log](https://github.com/bansalbhunesh/codedrift-arena/blob/main/assets/logs/logs%202.0.log) — V2 training run output
+
+Key metrics to look for:
 
 ```
 step 50  (end of SFT warmup): loss ~1.2 → decreasing
