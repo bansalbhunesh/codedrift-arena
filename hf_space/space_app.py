@@ -1018,6 +1018,14 @@ def _load_space_css() -> str:
         return "/* theme.css missing */ .gradio-container { min-height: 100vh; }"
 
 
+def _load_blog_md() -> str:
+    blog_path = Path(__file__).resolve().parent.parent / "BLOG.md"
+    try:
+        return blog_path.read_text(encoding="utf-8")
+    except OSError:
+        return "# Blog\n\n_BLOG.md not found._"
+
+
 _SPACE_CSS = _load_space_css()
 
 
@@ -1467,6 +1475,10 @@ with gr.Blocks(title="Bug Code Arena") as demo:
                     outputs=[real_status, real_json],
                 )
         
+            # ── Blog tab ───────────────────────────────────────────────────────
+            with gr.Tab("Blog"):
+                gr.Markdown(_load_blog_md())
+
             # ── Help / Why this works tab ──────────────────────────────────────
             with gr.Tab("About"):
                 gr.HTML(
