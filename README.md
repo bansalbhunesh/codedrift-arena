@@ -11,20 +11,19 @@ pinned: false
 
 # CodeDrift Arena
 
-**An [OpenEnv](https://github.com/)-style environment for training and evaluating code-review LLMs when the codebase has already moved on.**  
-A **generator** mutates a mini-repo (renames, removals, contract changes, and more). A **PR** still points at the old world. **Pytest** is the ground truth. The model must **name the stale reference**, **trace the failure path**, and **request changes**—not match keywords.
+**An [OpenEnv](https://github.com/open-env/openenv) environment for training and evaluating code-review LLMs when the codebase has already moved on.**  
+A **generator** mutates a mini-repo (renames, removals, contract changes, and more). A **PR** still points at the old world. **Pytest** is the ground truth. The model must **name the stale reference**, **trace the failure path**, and **request changes** — not match keywords.
 
 | | |
 |--|--|
 | **Live demo** | [![Hugging Face Space](https://img.shields.io/badge/🤗%20HuggingFace-Space-blue)](https://huggingface.co/spaces/Bhuneshlooper/CodeDrift) |
-| **YouTube walkthrough** | [![YouTube](https://img.shields.io/badge/YouTube-Demo-red?logo=youtube)](https://youtu.be/u64BUrGOQRs) |
-| **Blog / deep dive** | [BLOG.md](BLOG.md) — full story, training diagnostics, and reward graphs |
-| **Interactive slides** | [Open in browser](https://cdn.jsdelivr.net/gh/bansalbhunesh/codedrift-arena@main/docs/readme-slides.html) — Reveal.js deck (← →, **Esc** overview). Source: [`docs/readme-slides.html`](docs/readme-slides.html) |
+| **YouTube walkthrough (<2 min)** | [![YouTube](https://img.shields.io/badge/YouTube-Demo-red?logo=youtube)](https://youtu.be/u64BUrGOQRs) |
+| **Blog / deep dive** | [BLOG.md](BLOG.md) · also visible as the **📝 BLOG** tab in the Space |
+| **Colab training notebook** | [![Open In Colab](https://colab.research.google.com/assets/colab-badge.svg)](https://colab.research.google.com/github/bansalbhunesh/codedrift-arena/blob/main/colab/CodeDrift_GRPO.ipynb) |
+| **W&B training run** | [wandb.ai — sc4g3csw](https://wandb.ai/bhuneshbansal2003-thapar-university/huggingface/runs/sc4g3csw) |
 | **Source** | [github.com/bansalbhunesh/codedrift-arena](https://github.com/bansalbhunesh/codedrift-arena) |
-| **Stack** | Python · Gradio (CPU Space) · FastAPI + `openenv-core` (HTTP) · TRL **GRPO** + QLoRA (GPU train) · **pytest** as execution oracle (V2) |
+| **Stack** | Python · Gradio (CPU Space) · FastAPI + OpenEnv (HTTP) · TRL **GRPO** + QLoRA (GPU train) · **pytest** as execution oracle (V2) |
 | **Tests** | 60+ unit tests (v1 + v2) |
-
-> **Note:** GitHub’s `README.md` is static. The slide deck is a normal HTML file you can open **locally** (`docs/readme-slides.html`) or via the link above (served from jsDelivr after `main` has the file).
 
 ---
 
@@ -99,6 +98,35 @@ These are the **specific, measurable capabilities** a model gains from repeated 
 **Primary submission: Theme #4 (Self-Improvement)** — the environment *adapts to the model* and drives recursive capability growth in causal code debugging. The adaptive adversary is the mechanism; the capability grown is professional-grade code review reasoning.
 
 > Full technical write-up: [`BLOG.md`](BLOG.md)
+
+---
+
+## Training results
+
+> **Junior (untrained) vs Senior (GRPO-trained) — same bug, same PR, same tests:**
+> Junior: `VERDICT: APPROVE` → reward **−1.0** (bug ships). Senior: `REQUEST_CHANGES`, names root cause, traces failure path → reward **+2.05** (bug caught). Delta: **+3.05 per episode**. Senior wins 90%+ across the Gauntlet.
+
+### Reward graphs
+
+**V1 — reward function mean across training steps** *(rising mean = model is learning to catch bugs)*
+![V1 reward mean](https://media.githubusercontent.com/media/bansalbhunesh/codedrift-arena/main/assets/graphs/V1_rewardfn_mean.png)
+
+**V1 — full reward curves, run 1** *(reward std > 0 confirms GRPO has a real gradient)*
+![V1 reward graphs run 1](https://media.githubusercontent.com/media/bansalbhunesh/codedrift-arena/main/assets/graphs/V1_reward_graphs.png)
+
+**V1 — full reward curves, run 2** *(second run showing consistent learning signal)*
+![V1 reward graphs run 2](https://media.githubusercontent.com/media/bansalbhunesh/codedrift-arena/main/assets/graphs/V1_reward_graphs_2.png)
+
+**V2 — reward curves with causal scorer** *(JSON format + real pytest oracle)*
+![V2 reward graphs](https://media.githubusercontent.com/media/bansalbhunesh/codedrift-arena/main/assets/graphs/V2_reward_graphs.png)
+
+**All runs comparison** *(baseline flat at −0.5 vs trained runs improving)*
+![All runs comparison](https://media.githubusercontent.com/media/bansalbhunesh/codedrift-arena/main/assets/graphs/ALL_RUNS.png)
+
+![All runs comparison 2](https://media.githubusercontent.com/media/bansalbhunesh/codedrift-arena/main/assets/graphs/ALL_RUNS_2.png)
+
+> Full W&B run: [wandb.ai/bhuneshbansal2003-thapar-university/huggingface/runs/sc4g3csw](https://wandb.ai/bhuneshbansal2003-thapar-university/huggingface/runs/sc4g3csw)  
+> Raw training logs: [`assets/logs/logs 1.0.txt`](assets/logs/logs%201.0.txt) · [`assets/logs/logs 2.0.log`](assets/logs/logs%202.0.log)
 
 ---
 
@@ -414,8 +442,9 @@ V1: `POST /api/v1/reset`, `POST /api/v1/step` (session + single use per step as 
 - [x] HF Space, OpenEnv manifest, V1 + V2 stacks + tests
 - [x] Real-PR path + design-system Gradio UI
 - [x] Battle + Leaderboard in Space
-- [ ] Long run + curves in `outputs/`
-- [ ] Public adapter on Hub + short demo video
+- [x] Reward curves + training logs in `assets/`
+- [x] YouTube demo video + Blog tab on Space
+- [x] Colab training notebook
 
 ---
 
