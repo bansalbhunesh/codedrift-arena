@@ -179,22 +179,22 @@ Bug difficulty also scales with explicit levels:
 The graphs below show the reward curve across training steps. The key signal is **reward/std** — when it is above 0.05, GRPO has a real gradient. When it is zero, the model cannot update.
 
 ### V1 — Reward Function Mean
-![V1 Reward Function Mean](assets/graphs/V1_rewardfn_mean.png)
+![V1 Reward Function Mean](https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/assets/graphs/V1_rewardfn_mean.png)
 
 ### V1 — Reward Graphs
-![V1 Reward Graphs](assets/graphs/V1_reward_graphs.png)
+![V1 Reward Graphs](https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/assets/graphs/V1_reward_graphs.png)
 
 ### V1 — Reward Graphs (Run 2)
-![V1 Reward Graphs 2](assets/graphs/V1_reward_graphs_2.png)
+![V1 Reward Graphs 2](https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/assets/graphs/V1_reward_graphs_2.png)
 
 ### V2 — Reward Graphs
-![V2 Reward Graphs](assets/graphs/V2_reward_graphs.png)
+![V2 Reward Graphs](https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/assets/graphs/V2_reward_graphs.png)
 
 ### All Runs Comparison
-![All Runs](assets/graphs/ALL_RUNS.png)
+![All Runs](https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/assets/graphs/ALL_RUNS.png)
 
 ### All Runs Comparison (2)
-![All Runs 2](assets/graphs/ALL_RUNS_2.png)
+![All Runs 2](https://raw.githubusercontent.com/bansalbhunesh/codedrift-arena/main/assets/graphs/ALL_RUNS_2.png)
 
 ---
 
